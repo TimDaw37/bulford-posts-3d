@@ -90,11 +90,25 @@
   </script>
 </head>
 <body>
+  <script>
+    (function () {
+      if (/[?&]full=1(?:&|$)/.test(location.search)) return;
+      var maps = window.HTMLScriptElement && HTMLScriptElement.supports && HTMLScriptElement.supports("importmap");
+      var gl = false;
+      try {
+        var c = document.createElement("canvas");
+        gl = !!(c.getContext("webgl") || c.getContext("experimental-webgl"));
+      } catch (e) {}
+      var phone = window.matchMedia && matchMedia("(max-width: 800px)").matches;
+      if (!maps || !gl || phone) location.replace("light.html");
+    })();
+  </script>
   <div class="bar">
     <div class="bar-main">
       <div class="kicker"><a href="https://www.prehistoricsociety.org/publications/past/113" target="_blank" rel="noopener">PAST 113</a> · Harding, Leivers &amp; Silva, Prehistoric Society, 2026</div>
       <h1>Bulford post alignment</h1>
-      <div class="hint">Drag to rotate · right-drag to pan · scroll to zoom · click a pit for its name and coordinates.</div>
+      <div class="hint">Drag to rotate · right-drag to pan · scroll to zoom · click a pit.
+        <a href="light.html" style="pointer-events:auto;color:#b4532a">Light / mobile plan</a></div>
     </div>
     <div class="source">Pit positions are from the published <a href="https://www.prehistoricsociety.org/publications/past/113" target="_blank" rel="noopener">PAST 113</a> site plan, not the Wessex GNSS survey.</div>
   </div>

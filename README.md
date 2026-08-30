@@ -8,6 +8,10 @@ Drag to rotate, right-drag to pan, scroll to zoom. Date, epoch and first-gleam /
 
 **Live page:** <https://timdaw37.github.io/bulford-posts-3d/>
 
+**Light / mobile plan** (no WebGL, works on phones and old machines): <https://timdaw37.github.io/bulford-posts-3d/light.html>
+
+Phones and browsers without WebGL or import maps are sent to the light plan automatically. Add `?full=1` to the 3D URL to stay on the heavy viewer.
+
 ## Why the files are split
 
 A single HTML file with the maps inlined is about 3 MB (base64 makes images ~⅓ bigger). This repo keeps them as ordinary files:
