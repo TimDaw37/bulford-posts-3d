@@ -172,7 +172,7 @@
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
     controls.minPolarAngle = 0.02;
-    controls.maxPolarAngle = Math.PI * 0.92;
+    controls.maxPolarAngle = Math.PI - 0.04;
     controls.minDistance = 12;
     controls.maxDistance = 18000;
 
@@ -207,6 +207,7 @@
     hctx.drawImage(heightImg, 0, 0);
     const hdata = hctx.getImageData(0, 0, hCan.width, hCan.height).data;
 
+    const segs = 256;
     function sampleElevRaw(u, v) {
       const px = Math.min(hCan.width - 1, Math.max(0, Math.round(u * (hCan.width - 1))));
       const py = Math.min(hCan.height - 1, Math.max(0, Math.round(v * (hCan.height - 1))));
@@ -214,12 +215,24 @@
       return zmin + (g / 255) * (zmax - zmin);
     }
     function heightAt(x, z) {
+      // Match the terrain mesh (two triangles per quad), not the height texture.
+      // Otherwise pits sit on a 25 m sample while the sheet is 62 m triangles, and float.
       const u = x / width_m + 0.5;
       const v = z / height_m + 0.5;
-      return sampleElevRaw(u, v) * exaggeration;
+      const fx = Math.min(segs - 1e-9, Math.max(0, u * segs));
+      const fy = Math.min(segs - 1e-9, Math.max(0, v * segs));
+      const ix = Math.floor(fx), iy = Math.floor(fy);
+      const tx = fx - ix, ty = fy - iy;
+      const h00 = sampleElevRaw(ix / segs, iy / segs);
+      const h10 = sampleElevRaw((ix + 1) / segs, iy / segs);
+      const h01 = sampleElevRaw(ix / segs, (iy + 1) / segs);
+      const h11 = sampleElevRaw((ix + 1) / segs, (iy + 1) / segs);
+      const h = (tx + ty < 1)
+        ? h00 * (1 - tx - ty) + h10 * tx + h01 * ty
+        : h10 * (1 - ty) + h11 * (tx + ty - 1) + h01 * (1 - tx);
+      return h * exaggeration;
     }
 
-    const segs = 256;
     const geo = new THREE.BufferGeometry();
     const verts = [], uvs = [], idx = [];
     for (let iy = 0; iy <= segs; iy++) {
@@ -254,10 +267,48 @@
         drapeTex[k].magFilter = THREE.LinearFilter;
       }
     }
+    const pitXZArr = META.features.map((f) => new THREE.Vector2(f.x, f.z));
+    const pitRArr = META.features.map(() => 0);
+    let groundShader = null;
     const groundMat = new THREE.MeshStandardMaterial({
       map: drapeTex.landscape, roughness: 0.78, metalness: 0,
       side: THREE.DoubleSide, envMapIntensity: 0.4,
     });
+    groundMat.customProgramCacheKey = () => "bulford-pitholes-" + pitXZArr.length;
+    groundMat.onBeforeCompile = (shader) => {
+      groundShader = shader;
+      const n = pitXZArr.length;
+      shader.uniforms.pitXZ = { value: pitXZArr };
+      shader.uniforms.pitR = { value: pitRArr };
+      shader.vertexShader = shader.vertexShader
+        .replace(
+          "#include <common>",
+          "#include <common>\nvarying vec3 vPitWorld;"
+        )
+        .replace(
+          "void main() {",
+          "void main() {\nvPitWorld = (modelMatrix * vec4(position, 1.0)).xyz;"
+        );
+      shader.fragmentShader = shader.fragmentShader
+        .replace(
+          "#include <common>",
+          `#include <common>
+varying vec3 vPitWorld;
+uniform vec2 pitXZ[${n}];
+uniform float pitR[${n}];`
+        )
+        .replace(
+          "void main() {",
+          `void main() {
+for (int i = 0; i < ${n}; i++) {
+  float r = pitR[i];
+  if (r > 0.0) {
+    vec2 d = vPitWorld.xz - pitXZ[i];
+    if (dot(d, d) < r * r) discard;
+  }
+}`
+        );
+    };
     const ground = new THREE.Mesh(geo, groundMat);
     scene.add(ground);
     renderer.toneMappingExposure = 1.28;
@@ -277,6 +328,36 @@
     scene.add(pitGroup);
     const pits = {};
     const COLORS = { post: 0xc42828, base: 0xd97706, axis: 0xdc2626, henge: 0x44403c, pit: 0xeab308 };
+    const HOLE = 0x2a241c;
+
+    function visScale() { return postBoost * exaggeration / 4; }
+    function depthVis(f) {
+      const d = (META.pit_depth && META.pit_depth[f.id]) || (META.pit_depth && META.pit_depth.default) || 0.55;
+      return Math.max(d * visScale(), 1.4);
+    }
+    function upVis(f) {
+      if (f.kind !== "post") return 0.25 * visScale();
+      return META.post_h[f.id] * visScale();
+    }
+    function holeRadius(f) {
+      const s = Math.max(1, visScale() * 0.28);
+      if (f.kind === "post") return 1.15 * s;
+      if (f.kind === "base") return 0.95 * s;
+      return 0.72 * s;
+    }
+    function postRadius(f) {
+      const s = Math.max(1, visScale() * 0.22);
+      return (f.kind === "post" ? 0.48 : 0.32) * s;
+    }
+    function pitShown(f) {
+      return pitsOn || f.kind === "post" || f.kind === "base";
+    }
+    function syncPitRadii() {
+      META.features.forEach((f, i) => {
+        pitRArr[i] = pitShown(f) ? holeRadius(f) * 1.04 : 0;
+      });
+      if (groundShader) groundShader.uniforms.pitR.value = pitRArr;
+    }
 
     function makeLabel(text, cls) {
       const el = document.createElement("div");
@@ -285,32 +366,77 @@
       return new CSS2DObject(el);
     }
 
-    for (const f of META.features) {
+    function placeCut(p) {
+      const f = p.f;
       const y = heightAt(f.x, f.z);
       const isPost = f.kind === "post";
-      const h = isPost ? META.post_h[f.id] * postBoost * exaggeration / 4 : 1.2 * postBoost / 4;
-      const r = isPost ? 0.55 : (f.kind === "base" ? 0.45 : 0.32);
+      const down = depthVis(f);
+      const up = Math.max(upVis(f), 0.35);
+      const holeR = holeRadius(f);
+      const postR = postRadius(f);
+      const rBot = holeR * 0.62;
+      const lip = Math.max(0.12, holeR * 0.08);
+      const shaftH = down + lip;
+
+      p.hole.geometry.dispose();
+      p.hole.geometry = new THREE.CylinderGeometry(holeR, rBot, shaftH, 16, 1, true);
+      p.hole.position.set(f.x, y - down / 2 + lip / 2, f.z);
+      p.floor.position.y = -shaftH / 2;
+      p.floor.scale.set(rBot, rBot, 1);
+
+      p.mesh.geometry.dispose();
+      p.mesh.geometry = new THREE.CylinderGeometry(
+        postR, postR * (isPost ? 1.08 : 1.22), down + up, 10
+      );
+      p.mesh.position.set(f.x, y + (up - down) / 2, f.z);
+
+      p.rim.geometry.dispose();
+      p.rim.geometry = new THREE.TorusGeometry(holeR, Math.max(0.05, holeR * 0.07), 6, 20);
+      p.rim.position.set(f.x, y + 0.04, f.z);
+
+      p.hit.position.set(f.x, y, f.z);
+      p.lab.position.set(f.x, y + up + 1.2, f.z);
+    }
+
+    for (const f of META.features) {
+      const isPost = f.kind === "post";
       const mesh = new THREE.Mesh(
-        new THREE.CylinderGeometry(r, r * 1.15, Math.max(h, 0.8), 10),
+        new THREE.CylinderGeometry(0.5, 0.5, 1, 10),
         new THREE.MeshStandardMaterial({ color: COLORS[f.kind] || 0xeab308, roughness: 0.45 })
       );
-      mesh.position.set(f.x, y + Math.max(h, 0.8) / 2, f.z);
       mesh.userData = f;
-      pitGroup.add(mesh);
+      mesh.renderOrder = 2;
+      const hole = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.8, 0.4, 1, 16, 1, true),
+        new THREE.MeshStandardMaterial({
+          color: HOLE, roughness: 0.95, metalness: 0, side: THREE.DoubleSide,
+        })
+      );
+      hole.renderOrder = 1;
+      const floor = new THREE.Mesh(
+        new THREE.CircleGeometry(1, 16),
+        new THREE.MeshStandardMaterial({ color: 0x1a1612, roughness: 1, side: THREE.DoubleSide })
+      );
+      floor.rotation.x = -Math.PI / 2;
+      hole.add(floor);
+      const rim = new THREE.Mesh(
+        new THREE.TorusGeometry(1, 0.08, 6, 20),
+        new THREE.MeshStandardMaterial({ color: 0x3d342c, roughness: 0.9 })
+      );
+      rim.rotation.x = Math.PI / 2;
       const hit = new THREE.Mesh(
-        new THREE.SphereGeometry(7.5, 10, 8),
+        new THREE.SphereGeometry(4, 8, 6),
         new THREE.MeshBasicMaterial({ visible: false })
       );
-      hit.position.set(f.x, y + 2, f.z);
       hit.userData = f;
-      pitGroup.add(hit);
       const lab = makeLabel(f.id, isPost ? "post" : (f.kind === "base" ? "base" : ""));
-      lab.position.set(f.x, y + Math.max(h, 0.8) + 1.2, f.z);
-      lab.visible = isPost || f.kind === "base";
       lab.userData.always = isPost || f.kind === "base";
-      pitGroup.add(lab);
-      pits[f.id] = { f, mesh, lab, hit };
+      pitGroup.add(mesh, hole, rim, hit, lab);
+      pits[f.id] = { f, mesh, hole, hit, lab, floor, rim };
+      placeCut(pits[f.id]);
+      lab.visible = isPost || f.kind === "base";
     }
+    syncPitRadii();
     const pickables = Object.values(pits).map((p) => p.hit);
 
     const hengeGroup = new THREE.Group();
@@ -434,19 +560,8 @@
     }
 
     function relayoutPits() {
-      for (const id of Object.keys(pits)) {
-        const { f, mesh, lab } = pits[id];
-        const y = heightAt(f.x, f.z);
-        const isPost = f.kind === "post";
-        const h = isPost ? META.post_h[f.id] * postBoost * (exaggeration / 4) : 1.2 * (postBoost / 4);
-        mesh.geometry.dispose();
-        mesh.geometry = new THREE.CylinderGeometry(
-          isPost ? 0.55 : 0.32, isPost ? 0.65 : 0.38, Math.max(h, 0.8), 10
-        );
-        mesh.position.set(f.x, y + Math.max(h, 0.8) / 2, f.z);
-        lab.position.set(f.x, y + Math.max(h, 0.8) + 1.4, f.z);
-        if (pits[id].hit) pits[id].hit.position.set(f.x, y + 2, f.z);
-      }
+      for (const id of Object.keys(pits)) placeCut(pits[id]);
+      syncPitRadii();
       for (const ring of hengeGroup.children) {
         const h = META.henges.find(x => Math.abs(x.x - ring.position.x) < 1);
         if (h) ring.position.y = heightAt(h.x, h.z) + 0.5;
@@ -537,11 +652,14 @@
     document.getElementById("showPits").onchange = (e) => {
       pitsOn = e.target.checked;
       for (const id of Object.keys(pits)) {
-        const k = pits[id].f.kind;
-        if (k === "post" || k === "base") continue;
-        pits[id].mesh.visible = pitsOn;
-        pits[id].lab.visible = pitsOn && labelsOn && pits[id].lab.userData.always;
+        const p = pits[id];
+        if (p.f.kind === "post" || p.f.kind === "base") continue;
+        p.mesh.visible = pitsOn;
+        p.hole.visible = pitsOn;
+        p.rim.visible = pitsOn;
+        p.lab.visible = pitsOn && labelsOn && p.lab.userData.always;
       }
+      syncPitRadii();
     };
     document.getElementById("showLabs").onchange = (e) => {
       labelsOn = e.target.checked;
@@ -568,10 +686,15 @@
       p.lab.visible = (id === selectedId) || (labelsOn && p.lab.userData.always);
       p.lab.element.classList.toggle("sel", id === selectedId);
     }
+    function setPitGlow(p, hex, intensity) {
+      p.mesh.material.emissive = new THREE.Color(hex);
+      p.mesh.material.emissiveIntensity = intensity;
+      p.hole.material.emissive = new THREE.Color(hex);
+      p.hole.material.emissiveIntensity = intensity * 0.45;
+    }
     function deselectPit() {
       if (selectedId && pits[selectedId]) {
-        pits[selectedId].mesh.material.emissive = new THREE.Color(0x000000);
-        pits[selectedId].mesh.material.emissiveIntensity = 0;
+        setPitGlow(pits[selectedId], 0x000000, 0);
       }
       const prev = selectedId;
       selectedId = null;
@@ -585,16 +708,14 @@
         return;
       }
       if (selectedId && pits[selectedId]) {
-        pits[selectedId].mesh.material.emissive = new THREE.Color(0x000000);
-        pits[selectedId].mesh.material.emissiveIntensity = 0;
+        setPitGlow(pits[selectedId], 0x000000, 0);
         const old = selectedId;
         selectedId = id;
         applyLabelVis(old);
       }
       selectedId = id;
-      const { f, mesh } = pits[id];
-      mesh.material.emissive = new THREE.Color(0xffffff);
-      mesh.material.emissiveIntensity = 0.35;
+      const { f } = pits[id];
+      setPitGlow(pits[id], 0xffffff, 0.35);
       applyLabelVis(id);
       const card = document.getElementById("pick");
       card.innerHTML =
@@ -635,14 +756,15 @@
       for (const id of Object.keys(pits)) {
         const p = pits[id];
         if (!p.mesh.visible) continue;
-        v.set(p.f.x, p.mesh.position.y, p.f.z);
+        const gy = heightAt(p.f.x, p.f.z);
+        v.set(p.f.x, gy, p.f.z);
+        const dCam = camera.position.distanceTo(v);
         v.project(camera);
         if (v.z < -1 || v.z > 1) continue;
         const sx = (v.x * 0.5 + 0.5) * innerWidth;
         const sy = (-v.y * 0.5 + 0.5) * innerHeight;
         const dPix = Math.hypot(sx - x, sy - y);
         if (dPix > 22) continue;
-        const dCam = camera.position.distanceTo(p.mesh.position);
         const score = dPix + dCam * 0.015;
         if (score < bestScore) {
           bestScore = score;
