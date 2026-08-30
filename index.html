@@ -1,0 +1,702 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Bulford posts — 3D plan</title>
+  <style>
+    html, body { margin: 0; height: 100%; overflow: hidden; background: #e8eef4; font-family: Calibri, "Segoe UI", sans-serif; }
+    canvas { display: block; }
+    .bar {
+      position: absolute; left: 0; right: 0; top: 0; pointer-events: none;
+      background: linear-gradient(to bottom, #f7f4ee 72%, transparent);
+      padding: 14px 22px 28px; color: #1b3a4b;
+    }
+    .kicker { color: #b4532a; font-size: 11px; font-weight: 700; letter-spacing: .12em; }
+    h1 { margin: 3px 0 0; font-size: 22px; }
+    .hint { margin-top: 4px; font-size: 13px; color: #6b6560; }
+    .panel {
+      position: absolute; left: 14px; bottom: 14px; width: 340px;
+      background: #f7f4eef2; border: 1px solid #cfc6b8; border-radius: 10px;
+      padding: 12px 14px 10px; color: #1b3a4b; font-size: 13px;
+      max-height: calc(100vh - 120px); overflow: auto;
+    }
+    .panel label { display: block; margin: 8px 0 2px; font-weight: 700; font-size: 11px; letter-spacing: .04em; text-transform: uppercase; color: #6b6560; }
+    .row { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+    button {
+      background: #1b3a4b; color: #f7f4ee; border: 0; border-radius: 6px;
+      padding: 7px 10px; font: 600 12px Calibri, "Segoe UI", sans-serif; cursor: pointer;
+    }
+    button:hover, button.active { background: #b4532a; }
+    input[type=range] { width: 100%; }
+    .readout { font-variant-numeric: tabular-nums; font-size: 13px; margin-top: 2px; }
+    .readout b { color: #b4532a; }
+    .check { display: flex; align-items: center; gap: 8px; margin-top: 6px; font-weight: 600; }
+    .check input { margin: 0; }
+    .hud {
+      position: absolute; right: 16px; bottom: 16px; text-align: right;
+      color: #1b3a4b; font-size: 12px; background: #f7f4eecc; padding: 8px 10px; border-radius: 8px;
+      max-width: 280px;
+    }
+    .compass {
+      position: absolute; right: 20px; top: 92px; width: 52px; height: 52px;
+      border-radius: 50%; background: #f7f4ee; border: 2px solid #1b3a4b;
+      display: flex; align-items: center; justify-content: center;
+      pointer-events: none; color: #1b3a4b; font-weight: 700;
+    }
+    .compass span { position: absolute; top: 3px; font-size: 13px; }
+    .label {
+      color: #1b3a4b; font: 700 12px Calibri, "Segoe UI", sans-serif;
+      text-shadow: 0 0 4px #f7f4ee, 0 0 8px #f7f4ee; white-space: nowrap;
+    }
+    .label.post { color: #b42318; font-size: 13px; }
+    .label.base { color: #b4532a; }
+    .label.sel { color: #9a3412; text-decoration: underline; }
+    .pick {
+      margin-top: 10px; padding: 8px 10px; background: #fff; border: 1px solid #d9d0c4;
+      border-radius: 8px; font-variant-numeric: tabular-nums; line-height: 1.35;
+    }
+    .pick .pid { font-size: 18px; font-weight: 700; color: #b42318; }
+    .pick .kind { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: #6b6560; }
+    .pick code { font: 12px/1.4 Consolas, "Cascadia Mono", monospace; }
+    .pitlist { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px; max-height: 88px; overflow: auto; }
+    .pitlist button { padding: 3px 7px; font-size: 11px; background: #3d5560; }
+  </style>
+  <script type="importmap">
+  { "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+  } }
+  </script>
+</head>
+<body>
+  <div class="bar">
+    <div class="kicker">BULFORD · PAST 113</div>
+    <h1>Post alignment, 3D plan</h1>
+    <div class="hint">Drag to rotate · right-drag to pan · scroll to zoom · click a pit for its name and coordinates.</div>
+  </div>
+  <div class="compass"><span>N</span></div>
+  <div class="panel">
+    <div class="row">
+      <button id="viewPlan">Plan</button>
+      <button id="viewAlong" class="active">Along posts</button>
+      <button id="viewLand">Landscape</button>
+      <button id="orbit">Orbit</button>
+      <button id="reset">Reset</button>
+    </div>
+    <label>Ground drape</label>
+    <div class="row" id="drapeRow">
+      <button class="drape active" data-drape="landscape">Landscape</button>
+      <button class="drape" data-drape="osm">OpenStreetMap</button>
+      <button class="drape" data-drape="aerial">Aerial</button>
+    </div>
+    <label>Seasonal date <span id="dateLbl"></span></label>
+    <input id="doy" type="range" min="1" max="365" value="172" />
+    <div class="row">
+      <button data-doy="80">Spring equinox</button>
+      <button data-doy="172">Midsummer</button>
+      <button data-doy="266">Autumnal equinox</button>
+      <button data-doy="355">Midwinter</button>
+    </div>
+    <label>Epoch</label>
+    <div class="row">
+      <button class="yr active" data-year="-2949">2950 BC</button>
+      <button class="yr" data-year="-2499">2500 BC</button>
+      <button class="yr" data-year="2026">2026</button>
+    </div>
+    <label>Sun</label>
+    <div class="row">
+      <button class="mode active" data-mode="sunrise">Sunrise</button>
+      <button class="mode" data-mode="sunset">Sunset</button>
+      <button class="mode" data-mode="noon">Noon</button>
+    </div>
+    <label>Disc on the skyline</label>
+    <div class="row">
+      <button class="limb active" data-limb="upper">First gleam</button>
+      <button class="limb" data-limb="centre">Half orb</button>
+      <button class="limb" data-limb="lower">Full orb</button>
+    </div>
+    <label>Vertical exaggeration <span id="exLbl">4×</span></label>
+    <input id="exag" type="range" min="1" max="8" step="0.5" value="4" />
+    <label>Post height boost <span id="boostLbl">8×</span></label>
+    <input id="boost" type="range" min="1" max="20" step="1" value="8" />
+    <div class="check"><input type="checkbox" id="showAlign" checked /> Alignment line</div>
+    <div class="check"><input type="checkbox" id="showRay" checked /> Sun ray to 8647</div>
+    <div class="check"><input type="checkbox" id="showPits" checked /> All pits</div>
+    <div class="check"><input type="checkbox" id="showLabs" checked /> Labels</div>
+    <div class="pick" id="pick">Click any pit on the plan.</div>
+    <div class="pitlist" id="pitlist"></div>
+    <div class="readout" id="stats"></div>
+  </div>
+  <div class="hud" id="hud"></div>
+  <script type="module">
+    import * as THREE from "three";
+    import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+    import { CSS2DRenderer, CSS2DObject } from "three/addons/renderers/CSS2DRenderer.js";
+
+    const HEIGHT_URI = "assets/height.png";
+    const DRAPES = {
+      landscape: "assets/landscape.png",
+      osm: "assets/osm.jpg",
+      aerial: "assets/aerial.jpg",
+    };
+    const META = await (await fetch("assets/data.json")).json();
+
+    const MONTH = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+    const MDAYS = [31,28,31,30,31,30,31,31,30,31,30,31];
+    function doyLabel(d) {
+      let x = d;
+      for (let i = 0; i < 12; i++) {
+        if (x <= MDAYS[i]) return `${x} ${MONTH[i]}`;
+        x -= MDAYS[i];
+      }
+      return `${d}`;
+    }
+
+    const canvas = document.createElement("canvas");
+    document.body.prepend(canvas);
+    const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+    renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.05;
+
+    const labelRenderer = new CSS2DRenderer();
+    Object.assign(labelRenderer.domElement.style, { position: "absolute", top: "0", pointerEvents: "none" });
+    document.body.appendChild(labelRenderer.domElement);
+
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0xd8e4f0);
+    scene.fog = new THREE.Fog(0xd8e4f0, 11000, 24000);
+
+    const camera = new THREE.PerspectiveCamera(55, 2, 2, 80000);
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.minPolarAngle = 0.02;
+    controls.maxPolarAngle = Math.PI * 0.92;
+    controls.minDistance = 12;
+    controls.maxDistance = 18000;
+
+    const hemi = new THREE.HemisphereLight(0xfff6e8, 0x6a7d6a, 1.05);
+    scene.add(hemi);
+    const sunLight = new THREE.DirectionalLight(0xfff1c8, 1.15);
+    scene.add(sunLight);
+    scene.add(sunLight.target);
+    const fill = new THREE.DirectionalLight(0xdde8ff, 0.55);
+    fill.position.set(0.4, 1.2, 0.6);
+    scene.add(fill);
+    const amb = new THREE.AmbientLight(0xc5d0c8, 0.55);
+    scene.add(amb);
+
+    const { width_m, height_m, zmin, zmax } = META;
+    let exaggeration = META.exaggeration;
+    let postBoost = 8;
+
+    function loadImage(src) {
+      return new Promise((res, rej) => {
+        const img = new Image();
+        img.onload = () => res(img);
+        img.onerror = rej;
+        img.src = src;
+      });
+    }
+    const heightImg = await loadImage(HEIGHT_URI);
+    const hCan = document.createElement("canvas");
+    hCan.width = heightImg.width;
+    hCan.height = heightImg.height;
+    const hctx = hCan.getContext("2d", { willReadFrequently: true });
+    hctx.drawImage(heightImg, 0, 0);
+    const hdata = hctx.getImageData(0, 0, hCan.width, hCan.height).data;
+
+    function sampleElevRaw(u, v) {
+      const px = Math.min(hCan.width - 1, Math.max(0, Math.round(u * (hCan.width - 1))));
+      const py = Math.min(hCan.height - 1, Math.max(0, Math.round(v * (hCan.height - 1))));
+      const g = hdata[(py * hCan.width + px) * 4];
+      return zmin + (g / 255) * (zmax - zmin);
+    }
+    function heightAt(x, z) {
+      const u = x / width_m + 0.5;
+      const v = z / height_m + 0.5;
+      return sampleElevRaw(u, v) * exaggeration;
+    }
+
+    const segs = 256;
+    const geo = new THREE.BufferGeometry();
+    const verts = [], uvs = [], idx = [];
+    for (let iy = 0; iy <= segs; iy++) {
+      const v = iy / segs;
+      const z = (v - 0.5) * height_m;
+      for (let ix = 0; ix <= segs; ix++) {
+        const u = ix / segs;
+        const x = (u - 0.5) * width_m;
+        verts.push(x, sampleElevRaw(u, v) * exaggeration, z);
+        uvs.push(u, 1 - v);
+      }
+    }
+    const row = segs + 1;
+    for (let iy = 0; iy < segs; iy++) {
+      for (let ix = 0; ix < segs; ix++) {
+        const a = iy * row + ix, b = a + 1, c = a + row, d = c + 1;
+        idx.push(a, b, c, b, d, c);
+      }
+    }
+    geo.setAttribute("position", new THREE.Float32BufferAttribute(verts, 3));
+    geo.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
+    geo.setIndex(idx);
+    geo.computeVertexNormals();
+    const loader = new THREE.TextureLoader();
+    const drapeTex = {};
+    for (const k of Object.keys(DRAPES)) {
+      if (DRAPES[k]) {
+        drapeTex[k] = loader.load(DRAPES[k]);
+        drapeTex[k].colorSpace = THREE.SRGBColorSpace;
+        drapeTex[k].anisotropy = 16;
+        drapeTex[k].minFilter = THREE.LinearMipmapLinearFilter;
+        drapeTex[k].magFilter = THREE.LinearFilter;
+      }
+    }
+    const groundMat = new THREE.MeshStandardMaterial({
+      map: drapeTex.landscape, roughness: 0.78, metalness: 0,
+      side: THREE.DoubleSide, envMapIntensity: 0.4,
+    });
+    const ground = new THREE.Mesh(geo, groundMat);
+    scene.add(ground);
+    renderer.toneMappingExposure = 1.28;
+
+    function rebuildTerrainY() {
+      const pos = geo.attributes.position;
+      for (let i = 0; i < pos.count; i++) {
+        const u = (pos.getX(i) / width_m) + 0.5;
+        const v = (pos.getZ(i) / height_m) + 0.5;
+        pos.setY(i, sampleElevRaw(u, v) * exaggeration);
+      }
+      pos.needsUpdate = true;
+      geo.computeVertexNormals();
+    }
+
+    const pitGroup = new THREE.Group();
+    scene.add(pitGroup);
+    const pits = {};
+    const COLORS = { post: 0xc42828, base: 0xd97706, axis: 0xdc2626, henge: 0x44403c, pit: 0xeab308 };
+
+    function makeLabel(text, cls) {
+      const el = document.createElement("div");
+      el.className = "label" + (cls ? " " + cls : "");
+      el.textContent = text;
+      return new CSS2DObject(el);
+    }
+
+    for (const f of META.features) {
+      const y = heightAt(f.x, f.z);
+      const isPost = f.kind === "post";
+      const h = isPost ? META.post_h[f.id] * postBoost * exaggeration / 4 : 1.2 * postBoost / 4;
+      const r = isPost ? 0.55 : (f.kind === "base" ? 0.45 : 0.32);
+      const mesh = new THREE.Mesh(
+        new THREE.CylinderGeometry(r, r * 1.15, Math.max(h, 0.8), 10),
+        new THREE.MeshStandardMaterial({ color: COLORS[f.kind] || 0xeab308, roughness: 0.45 })
+      );
+      mesh.position.set(f.x, y + Math.max(h, 0.8) / 2, f.z);
+      mesh.userData = f;
+      pitGroup.add(mesh);
+      const hit = new THREE.Mesh(
+        new THREE.SphereGeometry(7.5, 10, 8),
+        new THREE.MeshBasicMaterial({ visible: false })
+      );
+      hit.position.set(f.x, y + 2, f.z);
+      hit.userData = f;
+      pitGroup.add(hit);
+      const lab = makeLabel(f.id, isPost ? "post" : (f.kind === "base" ? "base" : ""));
+      lab.position.set(f.x, y + Math.max(h, 0.8) + 1.2, f.z);
+      lab.visible = isPost || f.kind === "base";
+      lab.userData.always = isPost || f.kind === "base";
+      pitGroup.add(lab);
+      pits[f.id] = { f, mesh, lab, hit };
+    }
+    const pickables = Object.values(pits).map((p) => p.hit);
+
+    const hengeGroup = new THREE.Group();
+    scene.add(hengeGroup);
+    for (const h of META.henges) {
+      const y = heightAt(h.x, h.z) + 0.4;
+      const ring = new THREE.Mesh(
+        new THREE.TorusGeometry(h.r, 0.7, 8, 48),
+        new THREE.MeshStandardMaterial({ color: 0x57534e, roughness: 0.8 })
+      );
+      ring.rotation.x = Math.PI / 2;
+      ring.position.set(h.x, y, h.z);
+      hengeGroup.add(ring);
+    }
+
+    const align = new THREE.Group();
+    scene.add(align);
+    function alignmentPoints() {
+      const a = pits["8647"].f, b = pits["9019"].f;
+      const dx = b.x - a.x, dz = b.z - a.z;
+      const len = Math.hypot(dx, dz) || 1;
+      const ux = dx / len, uz = dz / len;
+      const pts = [];
+      for (let d = -900; d <= 6200; d += 40) {
+        const x = a.x + ux * d;
+        const z = a.z + uz * d;
+        pts.push(new THREE.Vector3(x, heightAt(x, z) + 0.8, z));
+      }
+      return pts;
+    }
+    let alignLine = new THREE.Line(
+      new THREE.BufferGeometry().setFromPoints(alignmentPoints()),
+      new THREE.LineBasicMaterial({ color: 0xc42828 })
+    );
+    align.add(alignLine);
+
+    const sunGroup = new THREE.Group();
+    scene.add(sunGroup);
+    const sunMesh = new THREE.Mesh(
+      new THREE.SphereGeometry(90, 24, 16),
+      new THREE.MeshBasicMaterial({ color: 0xffe566 })
+    );
+    sunGroup.add(sunMesh);
+    const sunGlow = new THREE.Mesh(
+      new THREE.SphereGeometry(160, 16, 12),
+      new THREE.MeshBasicMaterial({ color: 0xffc14d, transparent: true, opacity: 0.28 })
+    );
+    sunGroup.add(sunGlow);
+    const rayMat = new THREE.LineBasicMaterial({ color: 0xffcc66, transparent: true, opacity: 0.85 });
+    let sunRay = new THREE.Line(new THREE.BufferGeometry(), rayMat);
+    scene.add(sunRay);
+
+    const compass = document.querySelector(".compass");
+    let year = "-2949";
+    let doy = 172;
+    let sunMode = "sunrise";
+    let limbMode = "upper";
+    const LIMB_NAME = { upper: "first gleam", centre: "half orb", lower: "full orb" };
+    let orbiting = false;
+    let labelsOn = true;
+    let pitsOn = true;
+
+    function sunForDay() {
+      const table = META.sun[year] || META.sun["-2949"];
+      const day = table.days[doy - 1];
+      return { table, day };
+    }
+
+    function placeSun() {
+      const { table, day } = sunForDay();
+      let az, alt;
+      if (sunMode === "sunrise") {
+        az = (day.sr && typeof day.sr === "object") ? day.sr[limbMode] : day.sr;
+        alt = (day.sr_h && typeof day.sr_h === "object") ? day.sr_h[limbMode] : day.sr_h;
+      } else if (sunMode === "sunset") {
+        az = (day.ss && typeof day.ss === "object") ? day.ss[limbMode] : day.ss;
+        alt = (day.ss_h && typeof day.ss_h === "object") ? day.ss_h[limbMode] : day.ss_h;
+      }
+      else {
+        az = 180;
+        const dec = day.dec * Math.PI / 180;
+        const phi = META.lat * Math.PI / 180;
+        alt = Math.asin(Math.sin(phi) * Math.sin(dec) + Math.cos(phi) * Math.cos(dec)) * 180 / Math.PI;
+      }
+      if (az == null) az = sunMode === "sunset" ? 230 : 48;
+      if (alt == null) alt = 0.4;
+      // Scene −Z is OS grid north. event_azimuth returns TRUE bearings.
+      // true = grid + convergence  ⇒  plot at az − convergence.
+      const azGrid = az - META.convergence_deg;
+      const ar = azGrid * Math.PI / 180, hr = alt * Math.PI / 180;
+      const dist = 7000;
+      const sx = Math.sin(ar) * Math.cos(hr) * dist;
+      const sy = Math.sin(hr) * dist + 200;
+      const sz = -Math.cos(ar) * Math.cos(hr) * dist;
+      const p8647 = pits["8647"].f;
+      const origin = new THREE.Vector3(p8647.x, heightAt(p8647.x, p8647.z) + 1.6 * exaggeration, p8647.z);
+      sunMesh.position.set(origin.x + sx, origin.y + sy, origin.z + sz);
+      sunGlow.position.copy(sunMesh.position);
+      sunLight.position.copy(sunMesh.position);
+      sunLight.target.position.copy(origin);
+      const up = Math.max(0, Math.sin(hr));
+      sunLight.intensity = 0.85 + 0.55 * up;
+      hemi.intensity = 0.95 + 0.15 * up;
+      const dawn = THREE.MathUtils.clamp((alt + 2) / 10, 0, 1);
+      scene.background.setRGB(0.78 + 0.12 * dawn, 0.84 + 0.08 * dawn, 0.90 + 0.04 * dawn);
+      scene.fog.color.copy(scene.background);
+      sunRay.geometry.dispose();
+      sunRay.geometry = new THREE.BufferGeometry().setFromPoints([origin, sunMesh.position]);
+      const postAz = META.true_az_posts;
+      const dAz = ((az - postAz + 540) % 360) - 180;
+      document.getElementById("dateLbl").textContent = `· ${doyLabel(doy)}`;
+      document.getElementById("stats").innerHTML =
+        `<b>${doyLabel(doy)}</b> · ${year === "-2949" ? "2950 BC" : year === "-2499" ? "2500 BC" : "AD 2026"}<br>` +
+        `δ ${day.dec.toFixed(2)}° · ε ${table.eps.toFixed(2)}°<br>` +
+        `Sun ${sunMode} · ${LIMB_NAME[limbMode]} <b>${az.toFixed(2)}°</b> at h ${alt.toFixed(2)}°` +
+        (sunMode !== "noon" ? `<br>Posts true <b>${postAz.toFixed(2)}°</b> · Δ ${dAz >= 0 ? "+" : ""}${dAz.toFixed(2)}°` : "");
+      document.getElementById("hud").innerHTML =
+        `Grid 48.12° → true ${postAz.toFixed(2)}° (conv. +${META.convergence_deg}°)<br>` +
+        `Sun on OS grid · Bennett refraction · ${LIMB_NAME[limbMode]}<br>` +
+        `Pits digitised from PAST 113 plan, not Wessex GNSS.`;
+    }
+
+    function relayoutPits() {
+      for (const id of Object.keys(pits)) {
+        const { f, mesh, lab } = pits[id];
+        const y = heightAt(f.x, f.z);
+        const isPost = f.kind === "post";
+        const h = isPost ? META.post_h[f.id] * postBoost * (exaggeration / 4) : 1.2 * (postBoost / 4);
+        mesh.geometry.dispose();
+        mesh.geometry = new THREE.CylinderGeometry(
+          isPost ? 0.55 : 0.32, isPost ? 0.65 : 0.38, Math.max(h, 0.8), 10
+        );
+        mesh.position.set(f.x, y + Math.max(h, 0.8) / 2, f.z);
+        lab.position.set(f.x, y + Math.max(h, 0.8) + 1.4, f.z);
+        if (pits[id].hit) pits[id].hit.position.set(f.x, y + 2, f.z);
+      }
+      for (const ring of hengeGroup.children) {
+        const h = META.henges.find(x => Math.abs(x.x - ring.position.x) < 1);
+        if (h) ring.position.y = heightAt(h.x, h.z) + 0.5;
+      }
+      align.remove(alignLine);
+      alignLine.geometry.dispose();
+      alignLine = new THREE.Line(
+        new THREE.BufferGeometry().setFromPoints(alignmentPoints()),
+        alignLine.material
+      );
+      align.add(alignLine);
+      placeSun();
+    }
+
+    function viewPlan() {
+      const p = pits["8647"].f;
+      camera.position.set(p.x, 420, p.z + 8);
+      controls.target.set(p.x + 40, heightAt(p.x, p.z), p.z - 40);
+      controls.update();
+    }
+    function viewAlong() {
+      const a = pits["8025"].f;
+      const b = pits["9019"].f;
+      const ya = heightAt(a.x, a.z) + 1.7 * exaggeration;
+      camera.position.set(a.x, ya, a.z);
+      controls.target.set(b.x, heightAt(b.x, b.z) + 3 * exaggeration, b.z);
+      controls.update();
+    }
+    function viewLand() {
+      const p = pits["8647"].f;
+      camera.position.set(p.x - 280, 220, p.z + 420);
+      controls.target.set(p.x + 80, heightAt(p.x, p.z) + 8, p.z - 120);
+      controls.update();
+    }
+
+    document.getElementById("viewPlan").onclick = () => { orbiting = false; viewPlan(); };
+    document.getElementById("viewAlong").onclick = () => { orbiting = false; viewAlong(); };
+    document.getElementById("viewLand").onclick = () => { orbiting = false; viewLand(); };
+    document.getElementById("reset").onclick = () => { orbiting = false; viewAlong(); };
+    document.getElementById("orbit").onclick = (e) => {
+      orbiting = !orbiting;
+      e.target.classList.toggle("active", orbiting);
+    };
+    document.getElementById("doy").oninput = (e) => { doy = +e.target.value; placeSun(); };
+    document.querySelectorAll("[data-doy]").forEach(b => b.onclick = () => {
+      doy = +b.dataset.doy;
+      document.getElementById("doy").value = doy;
+      placeSun();
+    });
+    document.querySelectorAll(".yr").forEach(b => b.onclick = () => {
+      year = b.dataset.year;
+      document.querySelectorAll(".yr").forEach(x => x.classList.toggle("active", x === b));
+      placeSun();
+    });
+    document.querySelectorAll(".mode").forEach(b => b.onclick = () => {
+      sunMode = b.dataset.mode;
+      document.querySelectorAll(".mode").forEach(x => x.classList.toggle("active", x === b));
+      placeSun();
+    });
+    document.querySelectorAll(".limb").forEach(b => b.onclick = () => {
+      limbMode = b.dataset.limb;
+      document.querySelectorAll(".limb").forEach(x => x.classList.toggle("active", x === b));
+      placeSun();
+    });
+    document.getElementById("exag").oninput = (e) => {
+      exaggeration = +e.target.value;
+      document.getElementById("exLbl").textContent = exaggeration + "×";
+      rebuildTerrainY();
+      relayoutPits();
+    };
+    document.getElementById("boost").oninput = (e) => {
+      postBoost = +e.target.value;
+      document.getElementById("boostLbl").textContent = postBoost + "×";
+      relayoutPits();
+    };
+    document.querySelectorAll(".drape").forEach((b) => {
+      if (!DRAPES[b.dataset.drape]) b.style.display = "none";
+      b.onclick = () => {
+        const key = b.dataset.drape;
+        if (!drapeTex[key]) return;
+        groundMat.map = drapeTex[key];
+        groundMat.needsUpdate = true;
+        document.querySelectorAll(".drape").forEach((x) => x.classList.toggle("active", x === b));
+      };
+    });
+    document.getElementById("showAlign").onchange = (e) => { align.visible = e.target.checked; };
+    document.getElementById("showRay").onchange = (e) => { sunRay.visible = e.target.checked; };
+    document.getElementById("showPits").onchange = (e) => {
+      pitsOn = e.target.checked;
+      for (const id of Object.keys(pits)) {
+        const k = pits[id].f.kind;
+        if (k === "post" || k === "base") continue;
+        pits[id].mesh.visible = pitsOn;
+        pits[id].lab.visible = pitsOn && labelsOn && pits[id].lab.userData.always;
+      }
+    };
+    document.getElementById("showLabs").onchange = (e) => {
+      labelsOn = e.target.checked;
+      for (const id of Object.keys(pits)) applyLabelVis(id);
+    };
+
+    const KIND_NAME = {
+      post: "alignment post-pit",
+      base: "claimed base-station pit",
+      axis: "on the 48.1° axis",
+      henge: "henge / ring-ditch pit",
+      pit: "Late Neolithic / other pit",
+    };
+    let selectedId = null;
+    function labelShouldShow(id) {
+      const p = pits[id];
+      if (id === selectedId) return true;
+      if (!labelsOn) return false;
+      if (p.lab.userData.always) return true;
+      return pitsOn && labelsOn && false;
+    }
+    function applyLabelVis(id) {
+      const p = pits[id];
+      p.lab.visible = (id === selectedId) || (labelsOn && p.lab.userData.always);
+      p.lab.element.classList.toggle("sel", id === selectedId);
+    }
+    function deselectPit() {
+      if (selectedId && pits[selectedId]) {
+        pits[selectedId].mesh.material.emissive = new THREE.Color(0x000000);
+        pits[selectedId].mesh.material.emissiveIntensity = 0;
+      }
+      const prev = selectedId;
+      selectedId = null;
+      if (prev) applyLabelVis(prev);
+      document.getElementById("pick").innerHTML = "Click any pit on the plan. Click empty ground to clear.";
+      document.querySelectorAll("#pitlist button").forEach((b) => b.classList.remove("active"));
+    }
+    function selectPit(id) {
+      if (selectedId === id) {
+        deselectPit();
+        return;
+      }
+      if (selectedId && pits[selectedId]) {
+        pits[selectedId].mesh.material.emissive = new THREE.Color(0x000000);
+        pits[selectedId].mesh.material.emissiveIntensity = 0;
+        const old = selectedId;
+        selectedId = id;
+        applyLabelVis(old);
+      }
+      selectedId = id;
+      const { f, mesh } = pits[id];
+      mesh.material.emissive = new THREE.Color(0xffffff);
+      mesh.material.emissiveIntensity = 0.35;
+      applyLabelVis(id);
+      const card = document.getElementById("pick");
+      card.innerHTML =
+        `<div class="pid">${f.id}</div>` +
+        `<div class="kind">${KIND_NAME[f.kind] || f.kind}</div>` +
+        `<div style="margin-top:6px"><code>${f.e.toFixed(1)} E &nbsp; ${f.n.toFixed(1)} N</code></div>` +
+        `<div><code>${f.su}</code></div>` +
+        `<div><code>${Math.abs(f.lat).toFixed(6)}° ${f.lat >= 0 ? "N" : "S"} &nbsp; ${Math.abs(f.lon).toFixed(6)}° ${f.lon >= 0 ? "E" : "W"}</code></div>` +
+        `<div style="margin-top:4px">${f.range_m.toFixed(1)} m from 8647 · grid az ${f.grid_az.toFixed(1)}°` +
+        (f.kind === "post" && META.post_h[f.id] ? ` · post ${META.post_h[f.id]} m` : "") +
+        `</div>` +
+        `<div style="margin-top:6px;font-size:11px;color:#6b6560">Plan-digitised from PAST 113, not the Wessex GNSS archive. Click again or empty ground to clear.</div>`;
+      document.querySelectorAll("#pitlist button").forEach((b) => {
+        b.classList.toggle("active", b.dataset.id === id);
+      });
+    }
+    const list = document.getElementById("pitlist");
+    META.features.slice().sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true })).forEach((f) => {
+      const b = document.createElement("button");
+      b.textContent = f.id;
+      b.dataset.id = f.id;
+      b.title = `${f.id}  ${f.su}`;
+      b.onclick = () => selectPit(f.id);
+      list.appendChild(b);
+    });
+
+    const raycaster = new THREE.Raycaster();
+    const pointer = new THREE.Vector2();
+    let downX = 0, downY = 0;
+    function ndc(ev) {
+      pointer.x = (ev.clientX / innerWidth) * 2 - 1;
+      pointer.y = -(ev.clientY / innerHeight) * 2 + 1;
+    }
+    function hitPit(ev) {
+      const x = ev.clientX, y = ev.clientY;
+      const v = new THREE.Vector3();
+      let best = null, bestScore = 1e9;
+      for (const id of Object.keys(pits)) {
+        const p = pits[id];
+        if (!p.mesh.visible) continue;
+        v.set(p.f.x, p.mesh.position.y, p.f.z);
+        v.project(camera);
+        if (v.z < -1 || v.z > 1) continue;
+        const sx = (v.x * 0.5 + 0.5) * innerWidth;
+        const sy = (-v.y * 0.5 + 0.5) * innerHeight;
+        const dPix = Math.hypot(sx - x, sy - y);
+        if (dPix > 22) continue;
+        const dCam = camera.position.distanceTo(p.mesh.position);
+        const score = dPix + dCam * 0.015;
+        if (score < bestScore) {
+          bestScore = score;
+          best = id;
+        }
+      }
+      return best;
+    }
+    renderer.domElement.addEventListener("pointerdown", (ev) => {
+      if (ev.button !== 0) return;
+      downX = ev.clientX;
+      downY = ev.clientY;
+    });
+    renderer.domElement.addEventListener("pointerup", (ev) => {
+      if (ev.button !== 0) return;
+      if (Math.hypot(ev.clientX - downX, ev.clientY - downY) > 7) return;
+      const id = hitPit(ev);
+      if (id) selectPit(id);
+      else deselectPit();
+    });
+    renderer.domElement.addEventListener("pointermove", (ev) => {
+      renderer.domElement.style.cursor = hitPit(ev) ? "pointer" : "";
+    });
+
+    viewAlong();
+    placeSun();
+
+    function resize() {
+      const w = innerWidth, h = innerHeight;
+      renderer.setSize(w, h, false);
+      labelRenderer.setSize(w, h);
+      camera.aspect = w / h;
+      camera.updateProjectionMatrix();
+    }
+    addEventListener("resize", resize);
+    resize();
+
+    let t0 = performance.now();
+    function tick(now) {
+      controls.update();
+      if (orbiting) {
+        const p = pits["8647"].f;
+        const t = (now - t0) / 14000;
+        const r = 260;
+        camera.position.set(p.x + Math.cos(t) * r, heightAt(p.x, p.z) + 90, p.z + Math.sin(t) * r);
+        controls.target.set(p.x + 40, heightAt(p.x, p.z) + 6, p.z - 50);
+      }
+      const e = new THREE.Euler(0, Math.atan2(camera.position.x - controls.target.x, -(camera.position.z - controls.target.z)), 0);
+      compass.style.transform = `rotate(${-e.y * 180 / Math.PI}deg)`;
+      renderer.render(scene, camera);
+      labelRenderer.render(scene, camera);
+      requestAnimationFrame(tick);
+    }
+    requestAnimationFrame(tick);
+  </script>
+</body>
+</html>
