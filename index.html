@@ -622,10 +622,20 @@ for (int i = 0; i < ${n}; i++) {
       const r = lerpHor(azTrue, "range_m");
       return (r && r > 80) ? r : 2500;
     }
+    function distPastSheet(origin, dirx, dirz) {
+      const hx = width_m / 2, hz = height_m / 2;
+      let tx = Infinity, tz = Infinity;
+      if (dirx > 1e-8) tx = (hx - origin.x) / dirx;
+      else if (dirx < -1e-8) tx = (-hx - origin.x) / dirx;
+      if (dirz > 1e-8) tz = (hz - origin.z) / dirz;
+      else if (dirz < -1e-8) tz = (-hz - origin.z) / dirz;
+      const hit = Math.min(tx, tz);
+      if (!isFinite(hit) || hit < 500) return 12000;
+      return hit + 2000;
+    }
     function sunPlacement(azTrue, alt, origin) {
       const { x, z } = sunDir(azTrue);
-      const R = horizonRange(azTrue);
-      const dist = R + 220;
+      const dist = distPastSheet(origin, x, z);
       const a = THREE.MathUtils.clamp(alt, -4, 25) * Math.PI / 180;
       const rise = Math.tan(a) * exaggeration;
       return {
