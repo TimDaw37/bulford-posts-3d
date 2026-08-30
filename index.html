@@ -3,18 +3,25 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Bulford posts — 3D plan</title>
+  <title>Bulford post alignment — 3D plan</title>
   <style>
-    html, body { margin: 0; height: 100%; overflow: hidden; background: #e8eef4; font-family: Calibri, "Segoe UI", sans-serif; }
+    html, body { margin: 0; height: 100%; overflow: hidden; background: #1a2430; font-family: Calibri, "Segoe UI", sans-serif; }
     canvas { display: block; }
     .bar {
       position: absolute; left: 0; right: 0; top: 0; pointer-events: none;
-      background: linear-gradient(to bottom, #f7f4ee 72%, transparent);
-      padding: 14px 22px 28px; color: #1b3a4b;
+      background: linear-gradient(to bottom, #f7f4eef0 68%, transparent);
+      padding: 14px 22px 36px; color: #1b3a4b;
     }
-    .kicker { color: #b4532a; font-size: 11px; font-weight: 700; letter-spacing: .12em; }
+    .kicker { color: #b4532a; font-size: 12px; font-weight: 700; letter-spacing: .04em; }
+    .kicker a { pointer-events: auto; color: #b4532a; text-decoration: underline; }
     h1 { margin: 3px 0 0; font-size: 22px; }
     .hint { margin-top: 4px; font-size: 13px; color: #6b6560; }
+    .source {
+      margin-top: 6px; display: inline-block; pointer-events: auto;
+      background: #7f1d1d; color: #fff7ed; font: 700 13px Calibri, "Segoe UI", sans-serif;
+      padding: 5px 10px; border-radius: 6px; max-width: 42rem; line-height: 1.35;
+    }
+    .source a { color: #fed7aa; }
     .panel {
       position: absolute; left: 14px; bottom: 14px; width: 340px;
       background: #f7f4eef2; border: 1px solid #cfc6b8; border-radius: 10px;
@@ -62,6 +69,7 @@
     .pitlist { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px; max-height: 88px; overflow: auto; }
     .pitlist button { padding: 3px 7px; font-size: 11px; background: #3d5560; }
     .note { margin-top: 6px; font-size: 11px; color: #7a3b12; line-height: 1.35; background: #f4e6d4; padding: 6px 8px; border-radius: 6px; }
+    .note a { color: #9a3412; }
     .warn {
       position: absolute; left: 50%; top: 72px; transform: translateX(-50%);
       background: #7f1d1d; color: #fff7ed; font: 700 12px Calibri, "Segoe UI", sans-serif;
@@ -80,13 +88,15 @@
 </head>
 <body>
   <div class="bar">
-    <div class="kicker">BULFORD · PAST 113</div>
-    <h1>Post alignment, 3D plan</h1>
+    <div class="kicker"><a href="https://www.prehistoricsociety.org/publications/past/113" target="_blank" rel="noopener">PAST 113</a> · Harding, Leivers &amp; Silva, Prehistoric Society, 2026</div>
+    <h1>Bulford post alignment</h1>
     <div class="hint">Drag to rotate · right-drag to pan · scroll to zoom · click a pit for its name and coordinates.</div>
+    <div class="source">Pit positions are from the published <a href="https://www.prehistoricsociety.org/publications/past/113" target="_blank" rel="noopener">PAST 113</a> site plan, not the Wessex GNSS survey.</div>
   </div>
   <div class="compass"><span>N</span></div>
   <div class="warn" id="scaleWarn">Exaggerated — silhouette not to scale</div>
   <div class="panel">
+    <div class="note" style="margin-top:0">From the <a href="https://www.prehistoricsociety.org/publications/past/113" target="_blank" rel="noopener">PAST 113</a> plan, not the excavation GNSS.</div>
     <div class="row">
       <button id="viewPlan">Plan</button>
       <button id="viewAlong" class="active">Along posts</button>
@@ -188,15 +198,15 @@
     const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
     renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.05;
+    renderer.toneMappingExposure = 0.92;
 
     const labelRenderer = new CSS2DRenderer();
     Object.assign(labelRenderer.domElement.style, { position: "absolute", top: "0", pointerEvents: "none" });
     document.body.appendChild(labelRenderer.domElement);
 
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0xd8e4f0);
-    scene.fog = new THREE.Fog(0xd8e4f0, 11000, 24000);
+    scene.background = new THREE.Color(0x2a3548);
+    scene.fog = new THREE.Fog(0x2a3548, 9000, 22000);
 
     const camera = new THREE.PerspectiveCamera(55, 2, 2, 80000);
     const controls = new OrbitControls(camera, renderer.domElement);
@@ -206,15 +216,15 @@
     controls.minDistance = 12;
     controls.maxDistance = 18000;
 
-    const hemi = new THREE.HemisphereLight(0xfff6e8, 0x6a7d6a, 1.05);
+    const hemi = new THREE.HemisphereLight(0xc9d4e8, 0x3d4a3a, 0.55);
     scene.add(hemi);
-    const sunLight = new THREE.DirectionalLight(0xfff1c8, 1.15);
+    const sunLight = new THREE.DirectionalLight(0xffe2a8, 1.35);
     scene.add(sunLight);
     scene.add(sunLight.target);
-    const fill = new THREE.DirectionalLight(0xdde8ff, 0.55);
+    const fill = new THREE.DirectionalLight(0x8aa0b8, 0.22);
     fill.position.set(0.4, 1.2, 0.6);
     scene.add(fill);
-    const amb = new THREE.AmbientLight(0xc5d0c8, 0.55);
+    const amb = new THREE.AmbientLight(0x6a7580, 0.28);
     scene.add(amb);
 
     const { width_m, height_m, zmin, zmax } = META;
@@ -350,7 +360,7 @@ for (int i = 0; i < ${n}; i++) {
     };
     const ground = new THREE.Mesh(geo, groundMat);
     scene.add(ground);
-    renderer.toneMappingExposure = 1.28;
+    renderer.toneMappingExposure = 0.95;
 
     function rebuildTerrainY() {
       const pos = geo.attributes.position;
@@ -518,25 +528,36 @@ for (int i = 0; i < ${n}; i++) {
       const g = new THREE.Group();
       const mesh = new THREE.Mesh(
         new THREE.SphereGeometry(sunR, 24, 16),
-        new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 1 })
+        new THREE.MeshBasicMaterial({ color, toneMapped: false })
       );
       const glow = new THREE.Mesh(
-        new THREE.SphereGeometry(sunR * 1.35, 16, 12),
-        new THREE.MeshBasicMaterial({ color: glowColor, transparent: true, opacity: 0.28 })
+        new THREE.SphereGeometry(sunR * 3.2, 16, 12),
+        new THREE.MeshBasicMaterial({
+          color: glowColor, transparent: true, opacity: 0.55, depthWrite: false,
+          blending: THREE.AdditiveBlending, toneMapped: false,
+        })
+      );
+      const halo = new THREE.Mesh(
+        new THREE.SphereGeometry(sunR * 6.5, 16, 12),
+        new THREE.MeshBasicMaterial({
+          color: 0xfff1c0, transparent: true, opacity: 0.18, depthWrite: false,
+          blending: THREE.AdditiveBlending, toneMapped: false,
+        })
       );
       const band = new THREE.Mesh(
         new THREE.SphereGeometry(bandR, 24, 16),
         new THREE.MeshBasicMaterial({
-          color: 0xf59e0b, transparent: true, opacity: 0.12, depthWrite: false,
+          color: 0xf59e0b, transparent: true, opacity: 0.10, depthWrite: false,
+          toneMapped: false,
         })
       );
-      g.add(mesh, glow, band);
-      g.userData = { mesh, glow, band };
+      g.add(halo, glow, band, mesh);
+      g.userData = { mesh, glow, band, halo };
       scene.add(g);
       return g;
     }
-    const sunA = makeSun(0xffe566, 0xffc14d);
-    const sunB = makeSun(0xf97316, 0xfb923c);
+    const sunA = makeSun(0xfff6c2, 0xffc14d);
+    const sunB = makeSun(0xffd7a1, 0xfb923c);
     sunB.visible = false;
     const rayMat = new THREE.LineBasicMaterial({ color: 0xffcc66, transparent: true, opacity: 0.85 });
     let sunRay = new THREE.Line(new THREE.BufferGeometry(), rayMat);
@@ -602,9 +623,10 @@ for (int i = 0; i < ${n}; i++) {
     }
     function setSunGroup(g, pos, grey) {
       g.position.copy(pos);
-      g.userData.mesh.material.opacity = grey ? 0.35 : 1;
-      g.userData.glow.material.opacity = grey ? 0.08 : 0.28;
-      g.userData.band.material.opacity = grey ? 0.04 : 0.12;
+      g.userData.mesh.material.opacity = grey ? 0.45 : 1;
+      g.userData.glow.material.opacity = grey ? 0.18 : 0.55;
+      g.userData.band.material.opacity = grey ? 0.04 : 0.10;
+      if (g.userData.halo) g.userData.halo.material.opacity = grey ? 0.06 : 0.18;
     }
     function updateScaleWarn() {
       const off = exaggeration > 1.01 || postBoost > 1.01;
@@ -732,10 +754,10 @@ for (int i = 0; i < ${n}; i++) {
       }
       sunLight.target.position.copy(origin);
       const up = Math.max(0, Math.sin(alt * Math.PI / 180));
-      sunLight.intensity = 0.85 + 0.55 * up;
-      hemi.intensity = 0.95 + 0.15 * up;
+      sunLight.intensity = 1.05 + 0.45 * up;
+      hemi.intensity = 0.42 + 0.18 * up;
       const dawn = THREE.MathUtils.clamp((alt + 2) / 10, 0, 1);
-      scene.background.setRGB(0.78 + 0.12 * dawn, 0.84 + 0.08 * dawn, 0.90 + 0.04 * dawn);
+      scene.background.setRGB(0.14 + 0.16 * dawn, 0.18 + 0.12 * dawn, 0.28 + 0.10 * dawn);
       scene.fog.color.copy(scene.background);
 
       const mf = misfitLine(az, sunMode !== "sunset");
@@ -777,7 +799,7 @@ for (int i = 0; i < ${n}; i++) {
       document.getElementById("prov").innerHTML =
         `${P.dem || "OS Terrain 50"}<br>` +
         `${P.refraction || "Bennett 1982"} · k ${P.k || 0.13} · eye ${P.eye_m || 1.6} m<br>` +
-        `${P.pits || "Pits digitised from PAST 113, not Wessex GNSS."}`;
+        `${P.pits || "Pit positions from the PAST 113 plan, not the Wessex GNSS survey."}`;
       drawHorizonPlot(az, alt);
     }
 
@@ -995,7 +1017,7 @@ for (int i = 0; i < ${n}; i++) {
         `<div style="margin-top:4px">${f.range_m.toFixed(1)} m from 8647 · grid az ${f.grid_az.toFixed(1)}°` +
         (f.kind === "post" && META.post_h[f.id] ? ` · post ${META.post_h[f.id]} m` : "") +
         `</div>` +
-        `<div style="margin-top:6px;font-size:11px;color:#6b6560">Plan-digitised from PAST 113, not the Wessex GNSS archive. Click again or empty ground to clear.</div>`;
+        `<div style="margin-top:6px;font-size:11px;color:#7f1d1d">From the PAST 113 plan, not the Wessex GNSS survey. Click again or empty ground to clear.</div>`;
       document.querySelectorAll("#pitlist button").forEach((b) => {
         b.classList.toggle("active", b.dataset.id === id);
       });
