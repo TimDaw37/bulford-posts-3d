@@ -4,7 +4,7 @@ Interactive 3D plan of the Late Neolithic post-pits at Bulford, Wiltshire (Wesse
 
 Drag to rotate, right-drag to pan, scroll to zoom. Date, epoch and first-gleam / half-orb / full-orb control where the sun sits on the Terrain 50 skyline. Click a pit for its plan-digitised coordinates.
 
-**Live page (once GitHub Pages is on):** <https://timdaw37.github.io/bulford-posts-3d/>
+**Live page:** <https://timdaw37.github.io/bulford-posts-3d/>
 
 ## Why the files are split
 
