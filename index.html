@@ -61,6 +61,15 @@
     .pick code { font: 12px/1.4 Consolas, "Cascadia Mono", monospace; }
     .pitlist { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px; max-height: 88px; overflow: auto; }
     .pitlist button { padding: 3px 7px; font-size: 11px; background: #3d5560; }
+    .note { margin-top: 6px; font-size: 11px; color: #7a3b12; line-height: 1.35; background: #f4e6d4; padding: 6px 8px; border-radius: 6px; }
+    .warn {
+      position: absolute; left: 50%; top: 72px; transform: translateX(-50%);
+      background: #7f1d1d; color: #fff7ed; font: 700 12px Calibri, "Segoe UI", sans-serif;
+      padding: 6px 12px; border-radius: 6px; letter-spacing: .04em; display: none; pointer-events: none; z-index: 5;
+    }
+    .inset { margin-top: 8px; background: #fff; border: 1px solid #d9d0c4; border-radius: 8px; padding: 6px; }
+    .inset canvas { width: 100%; height: 92px; display: block; }
+    .prov { margin-top: 8px; font-size: 11px; color: #6b6560; line-height: 1.4; }
   </style>
   <script type="importmap">
   { "imports": {
@@ -76,6 +85,7 @@
     <div class="hint">Drag to rotate · right-drag to pan · scroll to zoom · click a pit for its name and coordinates.</div>
   </div>
   <div class="compass"><span>N</span></div>
+  <div class="warn" id="scaleWarn">Exaggerated — silhouette not to scale</div>
   <div class="panel">
     <div class="row">
       <button id="viewPlan">Plan</button>
@@ -90,6 +100,8 @@
       <button class="drape" data-drape="osm">OpenStreetMap</button>
       <button class="drape" data-drape="aerial">Aerial</button>
     </div>
+    <label id="horLbl">Horizon DEM</label>
+    <div class="row" id="horRow"></div>
     <label>Seasonal date <span id="dateLbl"></span></label>
     <input id="doy" type="range" min="1" max="365" value="172" />
     <div class="row">
@@ -112,21 +124,30 @@
     </div>
     <label>Disc on the skyline</label>
     <div class="row">
-      <button class="limb active" data-limb="upper">First gleam</button>
+      <button class="limb active" data-limb="upper" id="limbUpper">First gleam</button>
       <button class="limb" data-limb="centre">Half orb</button>
       <button class="limb" data-limb="lower">Full orb</button>
     </div>
-    <label>Vertical exaggeration <span id="exLbl">4×</span></label>
-    <input id="exag" type="range" min="1" max="8" step="0.5" value="4" />
-    <label>Post height boost <span id="boostLbl">8×</span></label>
-    <input id="boost" type="range" min="1" max="20" step="1" value="8" />
+    <div class="note" id="limbNote">Same limb at rise and set. Switching limbs moves the comparison by 1.78°. Do not mix conventions.</div>
+    <label>Vertical exaggeration <span id="exLbl">1×</span></label>
+    <input id="exag" type="range" min="1" max="8" step="0.5" value="1" />
+    <label>Post height boost <span id="boostLbl">1×</span></label>
+    <input id="boost" type="range" min="1" max="20" step="1" value="1" />
+    <div class="row"><button id="trueScale">True scale (1× / 1×)</button></div>
     <div class="check"><input type="checkbox" id="showAlign" checked /> Alignment line</div>
     <div class="check"><input type="checkbox" id="showRay" checked /> Sun ray to 8647</div>
+    <div class="check"><input type="checkbox" id="showBoth" /> Midsummer rise and midwinter set together</div>
     <div class="check"><input type="checkbox" id="showPits" checked /> All pits</div>
     <div class="check"><input type="checkbox" id="showLabs" checked /> Labels</div>
+    <label>Hypothetical treeline <span id="treeLbl">off</span></label>
+    <input id="treeH" type="range" min="0" max="20" step="1" value="0" />
+    <label>… at range <span id="treeRLbl">1000 m</span></label>
+    <input id="treeR" type="range" min="500" max="5000" step="100" value="1000" />
     <div class="pick" id="pick">Click any pit on the plan.</div>
     <div class="pitlist" id="pitlist"></div>
     <div class="readout" id="stats"></div>
+    <div class="inset"><canvas id="hPlot" width="600" height="180"></canvas></div>
+    <div class="prov" id="prov"></div>
   </div>
   <div class="hud" id="hud"></div>
   <script type="module">
@@ -197,10 +218,16 @@
     scene.add(amb);
 
     const { width_m, height_m, zmin, zmax } = META;
-    let exaggeration = META.exaggeration;
-    let postBoost = 8;
+    let exaggeration = META.exaggeration || 1;
+    let postBoost = META.post_boost || 1;
     let pitsOn = true;
     let labelsOn = true;
+    let showBoth = false;
+    let treeH = 0;
+    let treeR = 1000;
+    const SUN_DIST = 7000;
+    const SOLAR_SD = META.solar_sd_deg || 0.2667;
+    const UNC_AZ = META.uncertainty_az_deg || 0.4;
 
     function loadImage(src) {
       return new Promise((res, rej) => {
@@ -222,8 +249,9 @@
     function sampleElevRaw(u, v) {
       const px = Math.min(hCan.width - 1, Math.max(0, Math.round(u * (hCan.width - 1))));
       const py = Math.min(hCan.height - 1, Math.max(0, Math.round(v * (hCan.height - 1))));
-      const g = hdata[(py * hCan.width + px) * 4];
-      return zmin + (g / 255) * (zmax - zmin);
+      const i = (py * hCan.width + px) * 4;
+      const u16 = hdata[i] * 256 + hdata[i + 1];
+      return zmin + (u16 / 65535) * (zmax - zmin);
     }
     function heightAt(x, z) {
       // Match the terrain mesh (two triangles per quad), not the height texture.
@@ -484,28 +512,50 @@ for (int i = 0; i < ${n}; i++) {
     );
     align.add(alignLine);
 
-    const sunGroup = new THREE.Group();
-    scene.add(sunGroup);
-    const sunMesh = new THREE.Mesh(
-      new THREE.SphereGeometry(90, 24, 16),
-      new THREE.MeshBasicMaterial({ color: 0xffe566 })
-    );
-    sunGroup.add(sunMesh);
-    const sunGlow = new THREE.Mesh(
-      new THREE.SphereGeometry(160, 16, 12),
-      new THREE.MeshBasicMaterial({ color: 0xffc14d, transparent: true, opacity: 0.28 })
-    );
-    sunGroup.add(sunGlow);
+    const sunR = SUN_DIST * Math.tan(SOLAR_SD * Math.PI / 180);
+    const bandR = SUN_DIST * Math.tan((SOLAR_SD + UNC_AZ) * Math.PI / 180);
+    function makeSun(color, glowColor) {
+      const g = new THREE.Group();
+      const mesh = new THREE.Mesh(
+        new THREE.SphereGeometry(sunR, 24, 16),
+        new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 1 })
+      );
+      const glow = new THREE.Mesh(
+        new THREE.SphereGeometry(sunR * 1.35, 16, 12),
+        new THREE.MeshBasicMaterial({ color: glowColor, transparent: true, opacity: 0.28 })
+      );
+      const band = new THREE.Mesh(
+        new THREE.SphereGeometry(bandR, 24, 16),
+        new THREE.MeshBasicMaterial({
+          color: 0xf59e0b, transparent: true, opacity: 0.12, depthWrite: false,
+        })
+      );
+      g.add(mesh, glow, band);
+      g.userData = { mesh, glow, band };
+      scene.add(g);
+      return g;
+    }
+    const sunA = makeSun(0xffe566, 0xffc14d);
+    const sunB = makeSun(0xf97316, 0xfb923c);
+    sunB.visible = false;
     const rayMat = new THREE.LineBasicMaterial({ color: 0xffcc66, transparent: true, opacity: 0.85 });
     let sunRay = new THREE.Line(new THREE.BufferGeometry(), rayMat);
     scene.add(sunRay);
+    const rayMatB = new THREE.LineBasicMaterial({ color: 0xfb923c, transparent: true, opacity: 0.7 });
+    let sunRayB = new THREE.Line(new THREE.BufferGeometry(), rayMatB);
+    scene.add(sunRayB);
+    sunRayB.visible = false;
 
     const compass = document.querySelector(".compass");
     let year = "-2949";
     let doy = 172;
     let sunMode = "sunrise";
     let limbMode = "upper";
-    const LIMB_NAME = { upper: "first gleam", centre: "half orb", lower: "full orb" };
+    function limbName(mode) {
+      if (limbMode === "centre") return "half orb";
+      if (limbMode === "lower") return "full orb";
+      return mode === "sunset" ? "last gleam" : "first gleam";
+    }
     let orbiting = false;
 
     function sunForDay() {
@@ -513,59 +563,222 @@ for (int i = 0; i < ${n}; i++) {
       const day = table.days[doy - 1];
       return { table, day };
     }
+    function wrap180(d) { return ((d + 540) % 360) - 180; }
+    function lerpHor(az, key) {
+      const H = META.horizon;
+      const arr = H[key];
+      if (!arr || !arr.length) return null;
+      const a = H.az;
+      let x = ((az % 360) + 360) % 360;
+      let i = 0;
+      while (i < a.length - 1 && a[i + 1] < x) i++;
+      const a0 = a[i], a1 = a[(i + 1) % a.length];
+      const v0 = arr[i], v1 = arr[(i + 1) % arr.length];
+      if (v0 == null || v1 == null) return v0;
+      let span = a1 - a0;
+      if (span <= 0) span += 360;
+      let t = (x - a0) / span;
+      if (t < 0) t += 1;
+      return v0 + t * (v1 - v0);
+    }
+    function treeDh() {
+      if (treeH <= 0) return 0;
+      return Math.atan(treeH / treeR) * 180 / Math.PI;
+    }
+    function applyTree(az, alt, rising) {
+      const dh = treeDh();
+      if (!dh) return { az, alt };
+      const daz = 1.61 * dh * (rising ? 1 : -1);
+      return { az: az + daz, alt: alt + dh };
+    }
+    function sunPos(azTrue, alt, origin) {
+      const azGrid = azTrue - META.convergence_deg;
+      const ar = azGrid * Math.PI / 180, hr = alt * Math.PI / 180;
+      return new THREE.Vector3(
+        origin.x + Math.sin(ar) * Math.cos(hr) * SUN_DIST,
+        origin.y + Math.sin(hr) * SUN_DIST,
+        origin.z - Math.cos(ar) * Math.cos(hr) * SUN_DIST
+      );
+    }
+    function setSunGroup(g, pos, grey) {
+      g.position.copy(pos);
+      g.userData.mesh.material.opacity = grey ? 0.35 : 1;
+      g.userData.glow.material.opacity = grey ? 0.08 : 0.28;
+      g.userData.band.material.opacity = grey ? 0.04 : 0.12;
+    }
+    function updateScaleWarn() {
+      const off = exaggeration > 1.01 || postBoost > 1.01;
+      document.getElementById("scaleWarn").style.display = off ? "block" : "none";
+    }
+    function eventFromDay(day, mode) {
+      if (mode === "sunrise") {
+        return {
+          az: (day.sr && typeof day.sr === "object") ? day.sr[limbMode] : day.sr,
+          alt: (day.sr_h && typeof day.sr_h === "object") ? day.sr_h[limbMode] : day.sr_h,
+          rising: true,
+        };
+      }
+      if (mode === "sunset") {
+        return {
+          az: (day.ss && typeof day.ss === "object") ? day.ss[limbMode] : day.ss,
+          alt: (day.ss_h && typeof day.ss_h === "object") ? day.ss_h[limbMode] : day.ss_h,
+          rising: false,
+        };
+      }
+      const dec = day.dec * Math.PI / 180;
+      const phi = META.lat * Math.PI / 180;
+      return {
+        az: 180,
+        alt: Math.asin(Math.sin(phi) * Math.sin(dec) + Math.cos(phi) * Math.cos(dec)) * 180 / Math.PI,
+        rising: true,
+      };
+    }
+    function misfitLine(az, rising) {
+      const posts = rising ? META.true_az_posts : (META.true_az_posts_sw || META.true_az_posts + 180);
+      return { posts, dAz: wrap180(az - posts) };
+    }
+    function drawHorizonPlot(azMark, altMark) {
+      const c = document.getElementById("hPlot");
+      if (!c || !META.horizon) return;
+      const ctx = c.getContext("2d");
+      const W = c.width, H = c.height;
+      ctx.clearRect(0, 0, W, H);
+      ctx.fillStyle = "#fffdf8";
+      ctx.fillRect(0, 0, W, H);
+      const bands = [{ a0: 30, a1: 70 }, { a0: 210, a1: 250 }];
+      const gap = 8;
+      const w = (W - gap) / 2;
+      const Hmin = -0.2, Hmax = 2.6;
+      const yOf = (h) => 8 + (1 - (h - Hmin) / (Hmax - Hmin)) * (H - 20);
+      META.horizon.az.forEach((az, i) => {
+        const alt = META.horizon.alt[i] + treeDh();
+        bands.forEach((b, bi) => {
+          if (az < b.a0 || az > b.a1) return;
+          const x = bi * (w + gap) + ((az - b.a0) / (b.a1 - b.a0)) * w;
+          const y = yOf(alt);
+          ctx.fillStyle = "#1b3a4b";
+          ctx.fillRect(x, y, 1.2, 1.2);
+        });
+      });
+      const posts = [META.true_az_posts, META.true_az_posts_sw || META.true_az_posts + 180];
+      ctx.strokeStyle = "#b42318";
+      ctx.lineWidth = 1.5;
+      posts.forEach((paz) => {
+        bands.forEach((b, bi) => {
+          if (paz < b.a0 || paz > b.a1) return;
+          const x = bi * (w + gap) + ((paz - b.a0) / (b.a1 - b.a0)) * w;
+          ctx.beginPath(); ctx.moveTo(x, 6); ctx.lineTo(x, H - 8); ctx.stroke();
+        });
+      });
+      if (azMark != null) {
+        bands.forEach((b, bi) => {
+          if (azMark < b.a0 || azMark > b.a1) return;
+          const x = bi * (w + gap) + ((azMark - b.a0) / (b.a1 - b.a0)) * w;
+          ctx.fillStyle = "#ca8a04";
+          ctx.beginPath(); ctx.arc(x, yOf(altMark), 4, 0, 6.3); ctx.fill();
+        });
+      }
+      ctx.fillStyle = "#6b6560";
+      ctx.font = "16px Calibri, sans-serif";
+      ctx.fillText("30–70°", 8, H - 4);
+      ctx.fillText("210–250°", w + gap + 8, H - 4);
+    }
 
     function placeSun() {
       const { table, day } = sunForDay();
-      let az, alt;
-      if (sunMode === "sunrise") {
-        az = (day.sr && typeof day.sr === "object") ? day.sr[limbMode] : day.sr;
-        alt = (day.sr_h && typeof day.sr_h === "object") ? day.sr_h[limbMode] : day.sr_h;
-      } else if (sunMode === "sunset") {
-        az = (day.ss && typeof day.ss === "object") ? day.ss[limbMode] : day.ss;
-        alt = (day.ss_h && typeof day.ss_h === "object") ? day.ss_h[limbMode] : day.ss_h;
-      }
-      else {
-        az = 180;
-        const dec = day.dec * Math.PI / 180;
-        const phi = META.lat * Math.PI / 180;
-        alt = Math.asin(Math.sin(phi) * Math.sin(dec) + Math.cos(phi) * Math.cos(dec)) * 180 / Math.PI;
-      }
+      const ev = eventFromDay(day, sunMode);
+      let az = ev.az, alt = ev.alt;
       if (az == null) az = sunMode === "sunset" ? 230 : 48;
       if (alt == null) alt = 0.4;
-      // Scene −Z is OS grid north. event_azimuth returns TRUE bearings.
-      // true = grid + convergence  ⇒  plot at az − convergence.
-      const azGrid = az - META.convergence_deg;
-      const ar = azGrid * Math.PI / 180, hr = alt * Math.PI / 180;
-      const dist = 7000;
-      const sx = Math.sin(ar) * Math.cos(hr) * dist;
-      const sy = Math.sin(hr) * dist + 200;
-      const sz = -Math.cos(ar) * Math.cos(hr) * dist;
+      const adj = applyTree(az, alt, ev.rising);
+      az = adj.az; alt = adj.alt;
       const p8647 = pits["8647"].f;
       const origin = new THREE.Vector3(p8647.x, heightAt(p8647.x, p8647.z) + 1.6 * exaggeration, p8647.z);
-      sunMesh.position.set(origin.x + sx, origin.y + sy, origin.z + sz);
-      sunGlow.position.copy(sunMesh.position);
-      sunLight.position.copy(sunMesh.position);
+      const grey = exaggeration > 1.01 || postBoost > 1.01;
+      const midsummer = (META.sun[year] || META.sun["-2949"]).days[171];
+      const midwinter = (META.sun[year] || META.sun["-2949"]).days[354];
+      let bothHtml = "";
+      if (showBoth && midsummer && midwinter) {
+        const sr = applyTree(midsummer.sr[limbMode], midsummer.sr_h[limbMode], true);
+        const ss = applyTree(midwinter.ss[limbMode], midwinter.ss_h[limbMode], false);
+        az = sr.az; alt = sr.alt;
+        const pSr = sunPos(sr.az, sr.alt, origin);
+        const pSs = sunPos(ss.az, ss.alt, origin);
+        setSunGroup(sunA, pSr, grey);
+        sunB.visible = true;
+        sunRayB.visible = true;
+        setSunGroup(sunB, pSs, grey);
+        sunRay.geometry.dispose();
+        sunRay.geometry = new THREE.BufferGeometry().setFromPoints([origin, pSr]);
+        sunRayB.geometry.dispose();
+        sunRayB.geometry = new THREE.BufferGeometry().setFromPoints([origin, pSs]);
+        sunLight.position.copy(pSr);
+        const mSr = misfitLine(sr.az, true);
+        const mSs = misfitLine(ss.az, false);
+        const recNeed = 1.20;
+        const dh = (lerpHor(mSs.posts, "alt") || 0) - (lerpHor(mSr.posts, "alt") || 0);
+        bothHtml =
+          `<br>Both: midsummer ${limbName("sunrise")} <b>${sr.az.toFixed(2)}°</b> Δ ${mSr.dAz >= 0 ? "+" : ""}${mSr.dAz.toFixed(2)}°` +
+          `<br>midwinter ${limbName("sunset")} <b>${ss.az.toFixed(2)}°</b> Δ ${mSs.dAz >= 0 ? "+" : ""}${mSs.dAz.toFixed(2)}°` +
+          `<br>SW−NE horizon ${dh >= 0 ? "+" : ""}${dh.toFixed(2)}° (need ≈${recNeed.toFixed(1)}° for first-gleam both ways)`;
+      } else {
+        const pos = sunPos(az, alt, origin);
+        setSunGroup(sunA, pos, grey);
+        sunB.visible = false;
+        sunRayB.visible = false;
+        sunRay.geometry.dispose();
+        sunRay.geometry = new THREE.BufferGeometry().setFromPoints([origin, pos]);
+        sunLight.position.copy(pos);
+      }
       sunLight.target.position.copy(origin);
-      const up = Math.max(0, Math.sin(hr));
+      const up = Math.max(0, Math.sin(alt * Math.PI / 180));
       sunLight.intensity = 0.85 + 0.55 * up;
       hemi.intensity = 0.95 + 0.15 * up;
       const dawn = THREE.MathUtils.clamp((alt + 2) / 10, 0, 1);
       scene.background.setRGB(0.78 + 0.12 * dawn, 0.84 + 0.08 * dawn, 0.90 + 0.04 * dawn);
       scene.fog.color.copy(scene.background);
-      sunRay.geometry.dispose();
-      sunRay.geometry = new THREE.BufferGeometry().setFromPoints([origin, sunMesh.position]);
-      const postAz = META.true_az_posts;
-      const dAz = ((az - postAz + 540) % 360) - 180;
+
+      const mf = misfitLine(az, sunMode !== "sunset");
+      const rng = lerpHor(az, "range_m");
+      const hel = lerpHor(az, "elev_m");
+      const near = (() => {
+        const H = META.horizon;
+        if (!H || !H.near_rejected) return false;
+        let best = 0, bd = 1e9;
+        H.az.forEach((a, i) => {
+          const d = Math.abs(wrap180(a - az));
+          if (d < bd) { bd = d; best = i; }
+        });
+        return !!H.near_rejected[best] && bd < 0.3;
+      })();
+      const epochLbl = year === "-2949" ? "2950 BC" : year === "-2499" ? "2500 BC" : "AD 2026";
       document.getElementById("dateLbl").textContent = `· ${doyLabel(doy)}`;
+      document.getElementById("limbUpper").textContent = sunMode === "sunset" ? "Last gleam" : "First gleam";
+      updateScaleWarn();
+      const rngTxt = rng != null ? `${Math.round(rng)} m` : "—";
+      const nearTxt = near ? ` · <b>near-range guard</b>` : "";
       document.getElementById("stats").innerHTML =
-        `<b>${doyLabel(doy)}</b> · ${year === "-2949" ? "2950 BC" : year === "-2499" ? "2500 BC" : "AD 2026"}<br>` +
+        `<b>${doyLabel(doy)}</b> · ${epochLbl}<br>` +
         `δ ${day.dec.toFixed(2)}° · ε ${table.eps.toFixed(2)}°<br>` +
-        `Sun ${sunMode} · ${LIMB_NAME[limbMode]} <b>${az.toFixed(2)}°</b> at h ${alt.toFixed(2)}°` +
-        (sunMode !== "noon" ? `<br>Posts true <b>${postAz.toFixed(2)}°</b> · Δ ${dAz >= 0 ? "+" : ""}${dAz.toFixed(2)}°` : "");
+        `${sunMode} · ${limbName(sunMode)} <b>${az.toFixed(2)}°</b><br>` +
+        `horizon h ${alt.toFixed(2)}° · range ${rngTxt}` +
+        (hel != null ? ` · ${hel.toFixed(0)} m OD` : "") + nearTxt +
+        (sunMode !== "noon"
+          ? `<br>Alignment <b>${mf.posts.toFixed(2)}°</b> true · misfit <b>${mf.dAz >= 0 ? "+" : ""}${mf.dAz.toFixed(2)}°</b>`
+          : "") +
+        (treeH > 0 ? `<br>Treeline ${treeH} m at ${treeR} m is hypothetical.` : "") +
+        bothHtml;
+      const P = META.provenance || {};
       document.getElementById("hud").innerHTML =
-        `Grid 48.12° → true ${postAz.toFixed(2)}° (conv. +${META.convergence_deg}°)<br>` +
-        `Sun on OS grid · Bennett refraction · ${LIMB_NAME[limbMode]}<br>` +
-        `Pits digitised from PAST 113 plan, not Wessex GNSS.`;
+        `Grid ${META.grid_az_posts}° → true ${META.true_az_posts}° (conv. +${META.convergence_deg}°)<br>` +
+        `Sun ${SOLAR_SD * 2}° disc · ±${UNC_AZ}° band · ${limbName(sunMode)}<br>` +
+        `exag ${exaggeration}× · posts ${postBoost}×` +
+        (grey ? " · not to scale" : " · true scale");
+      document.getElementById("prov").innerHTML =
+        `${P.dem || "OS Terrain 50"}<br>` +
+        `${P.refraction || "Bennett 1982"} · k ${P.k || 0.13} · eye ${P.eye_m || 1.6} m<br>` +
+        `${P.pits || "Pits digitised from PAST 113, not Wessex GNSS."}`;
+      drawHorizonPlot(az, alt);
     }
 
     function relayoutPits() {
@@ -635,17 +848,63 @@ for (int i = 0; i < ${n}; i++) {
       document.querySelectorAll(".limb").forEach(x => x.classList.toggle("active", x === b));
       placeSun();
     });
+    function setExag(v) {
+      exaggeration = v;
+      document.getElementById("exag").value = v;
+      document.getElementById("exLbl").textContent = v + "×";
+    }
+    function setBoost(v) {
+      postBoost = v;
+      document.getElementById("boost").value = v;
+      document.getElementById("boostLbl").textContent = v + "×";
+    }
     document.getElementById("exag").oninput = (e) => {
-      exaggeration = +e.target.value;
-      document.getElementById("exLbl").textContent = exaggeration + "×";
+      setExag(+e.target.value);
       rebuildTerrainY();
       relayoutPits();
     };
     document.getElementById("boost").oninput = (e) => {
-      postBoost = +e.target.value;
-      document.getElementById("boostLbl").textContent = postBoost + "×";
+      setBoost(+e.target.value);
       relayoutPits();
     };
+    document.getElementById("trueScale").onclick = () => {
+      setExag(1);
+      setBoost(1);
+      rebuildTerrainY();
+      relayoutPits();
+    };
+    document.getElementById("showBoth").onchange = (e) => { showBoth = e.target.checked; placeSun(); };
+    document.getElementById("treeH").oninput = (e) => {
+      treeH = +e.target.value;
+      document.getElementById("treeLbl").textContent = treeH ? treeH + " m" : "off";
+      placeSun();
+    };
+    document.getElementById("treeR").oninput = (e) => {
+      treeR = +e.target.value;
+      document.getElementById("treeRLbl").textContent = treeR + " m";
+      placeSun();
+    };
+    const horRow = document.getElementById("horRow");
+    const horSets = META.horizons || {};
+    const sunSets = META.suns || {};
+    const horKeys = Object.keys(horSets);
+    horKeys.forEach((key, i) => {
+      const b = document.createElement("button");
+      b.textContent = key.includes("1 m") ? "EA 1 m + T50" : "Terrain 50";
+      b.className = key === META.horizon.source ? "active" : "";
+      b.onclick = () => {
+        META.horizon = horSets[key];
+        if (sunSets[key]) META.sun = sunSets[key];
+        horRow.querySelectorAll("button").forEach((x) => x.classList.toggle("active", x === b));
+        placeSun();
+      };
+      horRow.appendChild(b);
+    });
+    if (horKeys.length < 2) {
+      horRow.style.display = "none";
+      const hl = document.getElementById("horLbl");
+      if (hl) hl.style.display = "none";
+    }
     document.querySelectorAll(".drape").forEach((b) => {
       if (!DRAPES[b.dataset.drape]) b.style.display = "none";
       b.onclick = () => {

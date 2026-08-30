@@ -2,7 +2,9 @@
 
 Interactive 3D plan of the Late Neolithic post-pits at Bulford, Wiltshire (Wessex Archaeology excavation, published in Harding, Leivers & Silva, *PAST* 113, 2026).
 
-Drag to rotate, right-drag to pan, scroll to zoom. Date, epoch and first-gleam / half-orb / full-orb control where the sun sits on the Terrain 50 skyline. Click a pit for its plan-digitised coordinates.
+Drag to rotate, right-drag to pan, scroll to zoom. Date, epoch and first-gleam / half-orb / full-orb control where the sun sits on the skyline. True scale (1× / 1×) is the default whenever the sun is shown; exaggeration watermarks the view. Click a pit for its plan-digitised coordinates.
+
+**Pit positions are digitised from the published PAST 113 site plan, not the Wessex GNSS archive.**
 
 **Live page:** <https://timdaw37.github.io/bulford-posts-3d/>
 
@@ -13,7 +15,7 @@ A single HTML file with the maps inlined is about 3 MB (base64 makes images ~⅓
 | File | What it is |
 |---|---|
 | `index.html` | The viewer (Three.js from a CDN) |
-| `assets/height.png` | OS Terrain 50 elevation |
+| `assets/height.png` | Elevation, 16-bit packed in RGB |
 | `assets/landscape.png` | Hillshade drape |
 | `assets/osm.jpg` | OpenStreetMap |
 | `assets/aerial.jpg` | ESRI World Imagery |
@@ -33,7 +35,7 @@ The fat single-file copy (`bulford_3d.html`) is only for double-clicking on a la
 
 Pit positions are digitised from the published site plan, not the Wessex GNSS archive (that has not been released). Two independent readings of posts 8647 and 9019 agree to 0.2 m.
 
-Sunrise uses Bennett (1982) altitude-dependent refraction, upper/centre/lower limb, over an OS Terrain 50 horizon. Grid convergence at the site is +0.193° (true = grid + convergence). The 3D ground is OS grid; the sun is plotted on that grid.
+Sunrise uses Bennett (1982) altitude-dependent refraction, upper/centre/lower limb. The default skyline is EA 1 m LiDAR for the inner 3 km with Terrain 50 beyond; Terrain 50 alone is a comparison set. The 1 m composite may include the modern housing estate. Grid convergence at the site is +0.193° (true = grid + convergence). The 3D ground is OS grid; the sun is plotted on that grid at a 0.533° disc with a ±0.4° uncertainty band.
 
 ## Attribution
 
