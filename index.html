@@ -235,7 +235,7 @@
     let showBoth = false;
     let treeH = 0;
     let treeR = 1000;
-    const SUN_DIST = Math.max(width_m, height_m) * 0.75 + 6000;
+    const SUN_REF = 1000;
     const SOLAR_SD = META.solar_sd_deg || 0.2667;
     const UNC_AZ = META.uncertainty_az_deg || 0.4;
 
@@ -522,8 +522,8 @@ for (int i = 0; i < ${n}; i++) {
     );
     align.add(alignLine);
 
-    const sunR = SUN_DIST * Math.tan(SOLAR_SD * Math.PI / 180);
-    const bandR = SUN_DIST * Math.tan((SOLAR_SD + UNC_AZ) * Math.PI / 180);
+    const sunR = SUN_REF * Math.tan(SOLAR_SD * Math.PI / 180);
+    const bandR = SUN_REF * Math.tan((SOLAR_SD + UNC_AZ) * Math.PI / 180);
     function makeSun(color, glowColor) {
       const g = new THREE.Group();
       const mesh = new THREE.Mesh(
@@ -618,31 +618,27 @@ for (int i = 0; i < ${n}; i++) {
       const ar = azGrid * Math.PI / 180;
       return { x: Math.sin(ar), z: -Math.cos(ar) };
     }
-    function sunPos(azTrue, alt, origin) {
-      const { x, z } = sunDir(azTrue);
-      const a = THREE.MathUtils.clamp(alt, -4, 25);
-      const hr = Math.atan(Math.tan(a * Math.PI / 180) * exaggeration);
-      const dist = SUN_DIST;
-      return new THREE.Vector3(
-        origin.x + x * Math.cos(hr) * dist,
-        origin.y + Math.sin(hr) * dist,
-        origin.z + z * Math.cos(hr) * dist
-      );
+    function horizonRange(azTrue) {
+      const r = lerpHor(azTrue, "range_m");
+      return (r && r > 80) ? r : 2500;
     }
-    function rayPoints(azTrue, origin) {
+    function sunPlacement(azTrue, alt, origin) {
       const { x, z } = sunDir(azTrue);
-      const rng = lerpHor(azTrue, "range_m");
-      const end = Math.min(rng && rng > 80 ? rng : 6000, 8000);
-      const pts = [];
-      for (let d = 15; d <= end; d += 40) {
-        const px = origin.x + x * d;
-        const pz = origin.z + z * d;
-        pts.push(new THREE.Vector3(px, heightAt(px, pz) + 1.4 * exaggeration, pz));
-      }
-      if (pts.length < 2) {
-        pts.push(origin.clone(), origin.clone().add(new THREE.Vector3(x * 200, 0, z * 200)));
-      }
-      return pts;
+      const R = horizonRange(azTrue);
+      const dist = R + 220;
+      const a = THREE.MathUtils.clamp(alt, -4, 25) * Math.PI / 180;
+      const rise = Math.tan(a) * exaggeration;
+      return {
+        pos: new THREE.Vector3(
+          origin.x + x * dist,
+          origin.y + rise * dist,
+          origin.z + z * dist
+        ),
+        dist,
+      };
+    }
+    function sizeSun(g, dist) {
+      g.scale.setScalar(Math.max(0.2, dist / SUN_REF));
     }
     function setSunGroup(g, pos, grey) {
       g.position.copy(pos);
@@ -753,18 +749,19 @@ for (int i = 0; i < ${n}; i++) {
         const sr = applyTree(midsummer.sr[limbMode], midsummer.sr_h[limbMode], true);
         const ss = applyTree(midwinter.ss[limbMode], midwinter.ss_h[limbMode], false);
         az = sr.az; alt = sr.alt;
-        const pSr = sunPos(sr.az, sr.alt, origin);
-        const pSs = sunPos(ss.az, ss.alt, origin);
-        setSunGroup(sunA, pSr, grey);
+        const pSr = sunPlacement(sr.az, sr.alt, origin);
+        const pSs = sunPlacement(ss.az, ss.alt, origin);
+        setSunGroup(sunA, pSr.pos, grey);
+        sizeSun(sunA, pSr.dist);
         sunB.visible = true;
-        sunRayB.visible = true;
-        setSunGroup(sunB, pSs, grey);
+        setSunGroup(sunB, pSs.pos, grey);
+        sizeSun(sunB, pSs.dist);
         sunRay.geometry.dispose();
-        sunRay.geometry = new THREE.BufferGeometry().setFromPoints(rayPoints(sr.az, origin));
+        sunRay.geometry = new THREE.BufferGeometry().setFromPoints([origin, pSr.pos]);
         sunRayB.geometry.dispose();
-        sunRayB.geometry = new THREE.BufferGeometry().setFromPoints(rayPoints(ss.az, origin));
+        sunRayB.geometry = new THREE.BufferGeometry().setFromPoints([origin, pSs.pos]);
         sunRayB.visible = document.getElementById("showRay").checked;
-        sunLight.position.copy(pSr);
+        sunLight.position.copy(pSr.pos);
         const mSr = misfitLine(sr.az, true);
         const mSs = misfitLine(ss.az, false);
         const recNeed = 1.20;
@@ -774,13 +771,14 @@ for (int i = 0; i < ${n}; i++) {
           `<br>midwinter ${limbName("sunset")} <b>${ss.az.toFixed(2)}°</b> Δ ${mSs.dAz >= 0 ? "+" : ""}${mSs.dAz.toFixed(2)}°` +
           `<br>SW−NE horizon ${dh >= 0 ? "+" : ""}${dh.toFixed(2)}° (need ≈${recNeed.toFixed(1)}° for first-gleam both ways)`;
       } else {
-        const pos = sunPos(az, alt, origin);
-        setSunGroup(sunA, pos, grey);
+        const place = sunPlacement(az, alt, origin);
+        setSunGroup(sunA, place.pos, grey);
+        sizeSun(sunA, place.dist);
         sunB.visible = false;
         sunRayB.visible = false;
         sunRay.geometry.dispose();
-        sunRay.geometry = new THREE.BufferGeometry().setFromPoints(rayPoints(az, origin));
-        sunLight.position.copy(pos);
+        sunRay.geometry = new THREE.BufferGeometry().setFromPoints([origin, place.pos]);
+        sunLight.position.copy(place.pos);
       }
       sunLight.target.position.copy(origin);
       const up = Math.max(0, Math.sin(alt * Math.PI / 180));
@@ -868,11 +866,16 @@ for (int i = 0; i < ${n}; i++) {
     function viewAlong() {
       viewMode = "along";
       markView("viewAlong");
-      const a = pits["8025"].f;
-      const b = pits["9019"].f;
-      const ya = heightAt(a.x, a.z) + 1.7 * exaggeration;
-      camera.position.set(a.x, ya, a.z);
-      controls.target.set(b.x, heightAt(b.x, b.z) + 3 * exaggeration, b.z);
+      const sw = pits["8647"].f;
+      const ne = pits["9019"].f;
+      if (sunMode === "sunset") {
+        camera.position.set(ne.x, heightAt(ne.x, ne.z) + 1.7 * exaggeration, ne.z);
+        controls.target.set(sw.x, heightAt(sw.x, sw.z) + 2 * exaggeration, sw.z);
+      } else {
+        const a = pits["8025"] ? pits["8025"].f : sw;
+        camera.position.set(a.x, heightAt(a.x, a.z) + 1.7 * exaggeration, a.z);
+        controls.target.set(ne.x, heightAt(ne.x, ne.z) + 3 * exaggeration, ne.z);
+      }
       controls.update();
     }
     function viewLand() {
@@ -915,6 +918,7 @@ for (int i = 0; i < ${n}; i++) {
       if (doy === 355) sunMode = "sunset";
       if (doy === 172 || doy === 355) {
         document.querySelectorAll(".mode").forEach((x) => x.classList.toggle("active", x.dataset.mode === sunMode));
+        if (viewMode === "along") viewAlong();
       }
       placeSun();
     });
@@ -926,6 +930,7 @@ for (int i = 0; i < ${n}; i++) {
     document.querySelectorAll(".mode").forEach(b => b.onclick = () => {
       sunMode = b.dataset.mode;
       document.querySelectorAll(".mode").forEach(x => x.classList.toggle("active", x === b));
+      if (viewMode === "along") viewAlong();
       placeSun();
     });
     document.querySelectorAll(".limb").forEach(b => b.onclick = () => {
