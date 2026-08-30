@@ -206,7 +206,7 @@
 
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x2a3548);
-    scene.fog = new THREE.Fog(0x2a3548, 12000, 40000);
+    scene.fog = new THREE.Fog(0x2a3548, 28000, 80000);
 
     const camera = new THREE.PerspectiveCamera(55, 2, 2, 120000);
     const controls = new OrbitControls(camera, renderer.domElement);
@@ -613,16 +613,36 @@ for (int i = 0; i < ${n}; i++) {
       const daz = 1.61 * dh * (rising ? 1 : -1);
       return { az: az + daz, alt: alt + dh };
     }
-    function sunPos(azTrue, alt, origin) {
+    function sunDir(azTrue) {
       const azGrid = azTrue - META.convergence_deg;
       const ar = azGrid * Math.PI / 180;
-      const hr = Math.atan(Math.tan(alt * Math.PI / 180) * exaggeration);
+      return { x: Math.sin(ar), z: -Math.cos(ar) };
+    }
+    function sunPos(azTrue, alt, origin) {
+      const { x, z } = sunDir(azTrue);
+      const a = THREE.MathUtils.clamp(alt, -4, 25);
+      const hr = Math.atan(Math.tan(a * Math.PI / 180) * exaggeration);
       const dist = SUN_DIST;
       return new THREE.Vector3(
-        origin.x + Math.sin(ar) * Math.cos(hr) * dist,
+        origin.x + x * Math.cos(hr) * dist,
         origin.y + Math.sin(hr) * dist,
-        origin.z - Math.cos(ar) * Math.cos(hr) * dist
+        origin.z + z * Math.cos(hr) * dist
       );
+    }
+    function rayPoints(azTrue, origin) {
+      const { x, z } = sunDir(azTrue);
+      const rng = lerpHor(azTrue, "range_m");
+      const end = Math.min(rng && rng > 80 ? rng : 6000, 8000);
+      const pts = [];
+      for (let d = 15; d <= end; d += 40) {
+        const px = origin.x + x * d;
+        const pz = origin.z + z * d;
+        pts.push(new THREE.Vector3(px, heightAt(px, pz) + 1.4 * exaggeration, pz));
+      }
+      if (pts.length < 2) {
+        pts.push(origin.clone(), origin.clone().add(new THREE.Vector3(x * 200, 0, z * 200)));
+      }
+      return pts;
     }
     function setSunGroup(g, pos, grey) {
       g.position.copy(pos);
@@ -713,8 +733,14 @@ for (int i = 0; i < ${n}; i++) {
       const { table, day } = sunForDay();
       const ev = eventFromDay(day, sunMode);
       let az = ev.az, alt = ev.alt;
-      if (az == null) az = sunMode === "sunset" ? 230 : 48;
-      if (alt == null) alt = 0.4;
+      if (az == null || alt == null) {
+        sunA.visible = false;
+        sunB.visible = false;
+        document.getElementById("stats").innerHTML =
+          `<b>${doyLabel(doy)}</b> — no ${sunMode} for this date and limb.`;
+        return;
+      }
+      sunA.visible = true;
       const adj = applyTree(az, alt, ev.rising);
       az = adj.az; alt = adj.alt;
       const p8647 = pits["8647"].f;
@@ -734,9 +760,10 @@ for (int i = 0; i < ${n}; i++) {
         sunRayB.visible = true;
         setSunGroup(sunB, pSs, grey);
         sunRay.geometry.dispose();
-        sunRay.geometry = new THREE.BufferGeometry().setFromPoints([origin, pSr]);
+        sunRay.geometry = new THREE.BufferGeometry().setFromPoints(rayPoints(sr.az, origin));
         sunRayB.geometry.dispose();
-        sunRayB.geometry = new THREE.BufferGeometry().setFromPoints([origin, pSs]);
+        sunRayB.geometry = new THREE.BufferGeometry().setFromPoints(rayPoints(ss.az, origin));
+        sunRayB.visible = document.getElementById("showRay").checked;
         sunLight.position.copy(pSr);
         const mSr = misfitLine(sr.az, true);
         const mSs = misfitLine(ss.az, false);
@@ -752,7 +779,7 @@ for (int i = 0; i < ${n}; i++) {
         sunB.visible = false;
         sunRayB.visible = false;
         sunRay.geometry.dispose();
-        sunRay.geometry = new THREE.BufferGeometry().setFromPoints([origin, pos]);
+        sunRay.geometry = new THREE.BufferGeometry().setFromPoints(rayPoints(az, origin));
         sunLight.position.copy(pos);
       }
       sunLight.target.position.copy(origin);
@@ -884,6 +911,11 @@ for (int i = 0; i < ${n}; i++) {
     document.querySelectorAll("[data-doy]").forEach(b => b.onclick = () => {
       doy = +b.dataset.doy;
       document.getElementById("doy").value = doy;
+      if (doy === 172) sunMode = "sunrise";
+      if (doy === 355) sunMode = "sunset";
+      if (doy === 172 || doy === 355) {
+        document.querySelectorAll(".mode").forEach((x) => x.classList.toggle("active", x.dataset.mode === sunMode));
+      }
       placeSun();
     });
     document.querySelectorAll(".yr").forEach(b => b.onclick = () => {
@@ -966,12 +998,18 @@ for (int i = 0; i < ${n}; i++) {
         const key = b.dataset.drape;
         if (!drapeTex[key]) return;
         groundMat.map = drapeTex[key];
+        const lift = key === "aerial" ? 1.55 : key === "osm" ? 1.12 : 1.0;
+        groundMat.color.setRGB(lift, lift, lift);
         groundMat.needsUpdate = true;
         document.querySelectorAll(".drape").forEach((x) => x.classList.toggle("active", x === b));
       };
     });
     document.getElementById("showAlign").onchange = (e) => { align.visible = e.target.checked; };
-    document.getElementById("showRay").onchange = (e) => { sunRay.visible = e.target.checked; };
+    document.getElementById("showRay").onchange = (e) => {
+      sunRay.visible = e.target.checked;
+      if (!e.target.checked) sunRayB.visible = false;
+      else if (showBoth) sunRayB.visible = true;
+    };
     document.getElementById("showPits").onchange = (e) => {
       pitsOn = e.target.checked;
       for (const id of Object.keys(pits)) {
