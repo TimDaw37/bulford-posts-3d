@@ -134,6 +134,15 @@
     import { OrbitControls } from "three/addons/controls/OrbitControls.js";
     import { CSS2DRenderer, CSS2DObject } from "three/addons/renderers/CSS2DRenderer.js";
 
+    function showBootError(err) {
+      const el = document.createElement("pre");
+      el.style.cssText = "position:fixed;left:16px;right:16px;top:80px;z-index:20;background:#fff5f5;color:#9b1c1c;padding:12px;border-radius:8px;white-space:pre-wrap;";
+      el.textContent = (err && err.stack) ? err.stack : String(err);
+      document.body.appendChild(el);
+    }
+    window.addEventListener("error", (e) => showBootError(e.error || e.message));
+    window.addEventListener("unhandledrejection", (e) => showBootError(e.reason));
+
     const HEIGHT_URI = "assets/height.png";
     const DRAPES = {
       landscape: "assets/landscape.png",
@@ -190,6 +199,8 @@
     const { width_m, height_m, zmin, zmax } = META;
     let exaggeration = META.exaggeration;
     let postBoost = 8;
+    let pitsOn = true;
+    let labelsOn = true;
 
     function loadImage(src) {
       return new Promise((res, rej) => {
@@ -496,8 +507,6 @@ for (int i = 0; i < ${n}; i++) {
     let limbMode = "upper";
     const LIMB_NAME = { upper: "first gleam", centre: "half orb", lower: "full orb" };
     let orbiting = false;
-    let labelsOn = true;
-    let pitsOn = true;
 
     function sunForDay() {
       const table = META.sun[year] || META.sun["-2949"];
