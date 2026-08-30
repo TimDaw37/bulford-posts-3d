@@ -102,7 +102,7 @@
       <button id="viewAlong" class="active">Along posts</button>
       <button id="viewLand">Landscape</button>
       <button id="orbit">Orbit</button>
-      <button id="reset">Reset</button>
+      <button id="reset">Reset view</button>
     </div>
     <label>Ground drape</label>
     <div class="row" id="drapeRow">
@@ -206,15 +206,15 @@
 
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x2a3548);
-    scene.fog = new THREE.Fog(0x2a3548, 9000, 22000);
+    scene.fog = new THREE.Fog(0x2a3548, 12000, 40000);
 
-    const camera = new THREE.PerspectiveCamera(55, 2, 2, 80000);
+    const camera = new THREE.PerspectiveCamera(55, 2, 2, 120000);
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
     controls.minPolarAngle = 0.02;
     controls.maxPolarAngle = Math.PI - 0.04;
     controls.minDistance = 12;
-    controls.maxDistance = 18000;
+    controls.maxDistance = 45000;
 
     const hemi = new THREE.HemisphereLight(0xc9d4e8, 0x3d4a3a, 0.55);
     scene.add(hemi);
@@ -235,7 +235,7 @@
     let showBoth = false;
     let treeH = 0;
     let treeR = 1000;
-    const SUN_DIST = 7000;
+    const SUN_DIST = Math.max(width_m, height_m) * 0.75 + 6000;
     const SOLAR_SD = META.solar_sd_deg || 0.2667;
     const UNC_AZ = META.uncertainty_az_deg || 0.4;
 
@@ -528,30 +528,31 @@ for (int i = 0; i < ${n}; i++) {
       const g = new THREE.Group();
       const mesh = new THREE.Mesh(
         new THREE.SphereGeometry(sunR, 24, 16),
-        new THREE.MeshBasicMaterial({ color, toneMapped: false })
+        new THREE.MeshBasicMaterial({ color, toneMapped: false, fog: false })
       );
       const glow = new THREE.Mesh(
         new THREE.SphereGeometry(sunR * 3.2, 16, 12),
         new THREE.MeshBasicMaterial({
           color: glowColor, transparent: true, opacity: 0.55, depthWrite: false,
-          blending: THREE.AdditiveBlending, toneMapped: false,
+          blending: THREE.AdditiveBlending, toneMapped: false, fog: false,
         })
       );
       const halo = new THREE.Mesh(
         new THREE.SphereGeometry(sunR * 6.5, 16, 12),
         new THREE.MeshBasicMaterial({
           color: 0xfff1c0, transparent: true, opacity: 0.18, depthWrite: false,
-          blending: THREE.AdditiveBlending, toneMapped: false,
+          blending: THREE.AdditiveBlending, toneMapped: false, fog: false,
         })
       );
       const band = new THREE.Mesh(
         new THREE.SphereGeometry(bandR, 24, 16),
         new THREE.MeshBasicMaterial({
           color: 0xf59e0b, transparent: true, opacity: 0.10, depthWrite: false,
-          toneMapped: false,
+          toneMapped: false, fog: false,
         })
       );
       g.add(halo, glow, band, mesh);
+      g.renderOrder = 10;
       g.userData = { mesh, glow, band, halo };
       scene.add(g);
       return g;
@@ -614,11 +615,13 @@ for (int i = 0; i < ${n}; i++) {
     }
     function sunPos(azTrue, alt, origin) {
       const azGrid = azTrue - META.convergence_deg;
-      const ar = azGrid * Math.PI / 180, hr = alt * Math.PI / 180;
+      const ar = azGrid * Math.PI / 180;
+      const hr = Math.atan(Math.tan(alt * Math.PI / 180) * exaggeration);
+      const dist = SUN_DIST;
       return new THREE.Vector3(
-        origin.x + Math.sin(ar) * Math.cos(hr) * SUN_DIST,
-        origin.y + Math.sin(hr) * SUN_DIST,
-        origin.z - Math.cos(ar) * Math.cos(hr) * SUN_DIST
+        origin.x + Math.sin(ar) * Math.cos(hr) * dist,
+        origin.y + Math.sin(hr) * dist,
+        origin.z - Math.cos(ar) * Math.cos(hr) * dist
       );
     }
     function setSunGroup(g, pos, grey) {
@@ -820,13 +823,24 @@ for (int i = 0; i < ${n}; i++) {
       placeSun();
     }
 
+    let viewMode = "along";
+    function markView(id) {
+      ["viewPlan", "viewAlong", "viewLand"].forEach((k) => {
+        document.getElementById(k).classList.toggle("active", k === id);
+      });
+    }
     function viewPlan() {
+      viewMode = "plan";
+      markView("viewPlan");
       const p = pits["8647"].f;
-      camera.position.set(p.x, 420, p.z + 8);
-      controls.target.set(p.x + 40, heightAt(p.x, p.z), p.z - 40);
+      const y = heightAt(p.x, p.z);
+      camera.position.set(p.x, y + 220 * Math.max(1, exaggeration), p.z + 8);
+      controls.target.set(p.x + 40, y, p.z - 40);
       controls.update();
     }
     function viewAlong() {
+      viewMode = "along";
+      markView("viewAlong");
       const a = pits["8025"].f;
       const b = pits["9019"].f;
       const ya = heightAt(a.x, a.z) + 1.7 * exaggeration;
@@ -835,16 +849,33 @@ for (int i = 0; i < ${n}; i++) {
       controls.update();
     }
     function viewLand() {
+      viewMode = "land";
+      markView("viewLand");
       const p = pits["8647"].f;
-      camera.position.set(p.x - 280, 220, p.z + 420);
-      controls.target.set(p.x + 80, heightAt(p.x, p.z) + 8, p.z - 120);
+      const y = heightAt(p.x, p.z);
+      camera.position.set(p.x - 280, y + 90 * Math.max(1, exaggeration), p.z + 420);
+      controls.target.set(p.x + 80, y + 8, p.z - 120);
       controls.update();
+    }
+    function applyCurrentView() {
+      if (viewMode === "plan") viewPlan();
+      else if (viewMode === "land") viewLand();
+      else viewAlong();
+    }
+    function resetView() {
+      orbiting = false;
+      document.getElementById("orbit").classList.remove("active");
+      setExag(1);
+      setBoost(1);
+      rebuildTerrainY();
+      relayoutPits();
+      viewAlong();
     }
 
     document.getElementById("viewPlan").onclick = () => { orbiting = false; viewPlan(); };
     document.getElementById("viewAlong").onclick = () => { orbiting = false; viewAlong(); };
     document.getElementById("viewLand").onclick = () => { orbiting = false; viewLand(); };
-    document.getElementById("reset").onclick = () => { orbiting = false; viewAlong(); };
+    document.getElementById("reset").onclick = () => resetView();
     document.getElementById("orbit").onclick = (e) => {
       orbiting = !orbiting;
       e.target.classList.toggle("active", orbiting);
@@ -884,6 +915,7 @@ for (int i = 0; i < ${n}; i++) {
       setExag(+e.target.value);
       rebuildTerrainY();
       relayoutPits();
+      applyCurrentView();
     };
     document.getElementById("boost").oninput = (e) => {
       setBoost(+e.target.value);
@@ -894,6 +926,7 @@ for (int i = 0; i < ${n}; i++) {
       setBoost(1);
       rebuildTerrainY();
       relayoutPits();
+      applyCurrentView();
     };
     document.getElementById("showBoth").onchange = (e) => { showBoth = e.target.checked; placeSun(); };
     document.getElementById("treeH").oninput = (e) => {
